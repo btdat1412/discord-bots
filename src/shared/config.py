@@ -1,5 +1,9 @@
+import os
 from typing import List
 from dataclasses import dataclass
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 @dataclass
@@ -21,17 +25,18 @@ class BotCfg:
 
 BOT_CONFIGS = [
     BotCfg(
-        name="hello",
-        token="YOUR_DISCORD_BOT_TOKEN_HERE",
+        name="ti-gia",
+        token=os.getenv("TI_GIA_BOT_TOKEN", ""),
         intents=IntentsCfg(
+            # intents = permissions of the bot
             guilds=True,
             members=False,
             messages=True,
-            message_content=True,
+            message_content=False,
             reactions=True,
         ),
-        cogs=["src.bots.example_bot"],
-    )
+        cogs=["src.bots.ti_gia_bot"],
+    ),
 ]
 
 

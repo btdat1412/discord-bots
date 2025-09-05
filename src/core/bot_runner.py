@@ -6,7 +6,7 @@ import discord
 
 from src.shared.config import BotCfg
 from src.shared.logging_conf import setup_logging
-from base_bot import BaseBot
+from src.core.base_bot import BaseBot
 
 log = logging.getLogger(__name__)
 
