@@ -29,39 +29,60 @@ class TiGiaBot:
         async def ti_gia(interaction: discord.Interaction):
             await interaction.response.defer(thinking=True)
             try:
-                usd_task = self._fetch_vcb_usd()
-                gold_task = self._fetch_sjc_gold()
-
-                usd, gold = await asyncio.gather(
-                    usd_task, gold_task, return_exceptions=True
-                )
-
-                usd_text = (
-                    self._format_usd_text(usd)
-                    if not isinstance(usd, Exception)
-                    else f"❌ VCB lỗi: {usd}"
-                )
-                gold_text = (
-                    self._format_gold_text(gold)
-                    if not isinstance(gold, Exception)
-                    else f"❌ SJC lỗi: {gold}"
-                )
-
-                embed = discord.Embed(
-                    title="Tỉ giá & Giá vàng",
-                    description="Nguồn: Vietcombank, SJC",
-                    color=discord.Color.gold(),
-                )
-                embed.add_field(
-                    name="💵 USD/VND (Vietcombank)", value=usd_text, inline=False
-                )
-                embed.add_field(name="🏅 Giá vàng SJC", value=gold_text, inline=False)
-
+                embed = await self.execute_ti_gia()
                 log.info("💬 Sending response to Discord...")
                 await interaction.followup.send(embed=embed)
             except Exception as e:
                 log.exception("Error in /ti-gia")
                 await interaction.followup.send(f"Đã xảy ra lỗi: {e}")
+
+    async def execute_ti_gia(
+        self, title: str = "Tỉ giá & Giá vàng", footer: Optional[str] = None
+    ) -> discord.Embed:
+
+        try:
+            usd_task = self._fetch_vcb_usd()
+            gold_task = self._fetch_sjc_gold()
+
+            usd, gold = await asyncio.gather(
+                usd_task, gold_task, return_exceptions=True
+            )
+
+            usd_text = (
+                self._format_usd_text(usd)
+                if not isinstance(usd, Exception)
+                else f"❌ VCB lỗi: {usd}"
+            )
+            gold_text = (
+                self._format_gold_text(gold)
+                if not isinstance(gold, Exception)
+                else f"❌ SJC lỗi: {gold}"
+            )
+
+            embed = discord.Embed(
+                title=title,
+                description="Nguồn: Vietcombank, SJC",
+                color=discord.Color.gold(),
+            )
+            embed.add_field(
+                name="💵 USD/VND (Vietcombank)", value=usd_text, inline=False
+            )
+            embed.add_field(name="🏅 Giá vàng SJC", value=gold_text, inline=False)
+
+            if footer:
+                embed.set_footer(text=footer)
+
+            return embed
+
+        except Exception as e:
+            log.exception("Error in execute_ti_gia")
+            # Return error embed
+            error_embed = discord.Embed(
+                title="❌ Lỗi",
+                description=f"Đã xảy ra lỗi: {e}",
+                color=discord.Color.red(),
+            )
+            return error_embed
 
     # ---------------- Fetchers ----------------
     async def _fetch_vcb_usd(self) -> Tuple[str, str, str]:

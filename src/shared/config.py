@@ -32,7 +32,7 @@ BOT_CONFIGS = [
             guilds=True,
             members=False,
             messages=True,
-            message_content=False,
+            message_content=True,
             reactions=True,
         ),
         cogs=["src.bots.ti_gia_bot"],
