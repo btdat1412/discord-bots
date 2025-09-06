@@ -65,7 +65,7 @@ async def run_bot_async(cfg: BotCfg):
 
 def run_bot(cfg: BotCfg):
     """
-    Run bot with auto-discovered cron jobs.
+    Run Bot with Setup
 
     Args:
         cfg: Bot configuration
