@@ -11,7 +11,7 @@ class IntentsCfg:
     guilds: bool = True
     members: bool = False
     messages: bool = True
-    message_content: bool = True
+    message_content: bool = False  # Privileged intent - set to False by default
     reactions: bool = True
 
 
@@ -32,7 +32,7 @@ BOT_CONFIGS = [
             guilds=True,
             members=False,
             messages=True,
-            message_content=True,
+            message_content=False,
             reactions=True,
         ),
         cogs=["src.bots.ti_gia_bot"],
