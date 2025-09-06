@@ -106,9 +106,6 @@ class TiGiaBot:
                 # Try to parse as XML
                 try:
                     text = await resp.text()
-                    log.info(
-                        "🏦 VCB XML/Text content (first 500 chars): %s", text[:500]
-                    )
                     return self._parse_vcb_xml(text)
                 except Exception as xml_error:
                     log.error("🏦 Failed to parse as XML: %s", xml_error)
@@ -122,7 +119,6 @@ class TiGiaBot:
         exrates = data.get("Exrate") or data.get("exrate") or []
 
         for i, row in enumerate(exrates):
-            log.info("🏦 Row %d: %s", i, row)
             code = row.get("CurrencyCode") or row.get("@CurrencyCode")
             if code and code.upper() == "USD":
                 buy = row.get("Buy") or row.get("@Buy") or ""
@@ -142,29 +138,11 @@ class TiGiaBot:
         """Parse VCB XML response"""
         import xml.etree.ElementTree as ET
 
-        log.info("🏦 Parsing XML data...")
-
         try:
             root = ET.fromstring(xml_text)
-            log.info("🏦 XML root tag: %s", root.tag)
-            log.info("🏦 XML root attributes: %s", root.attrib)
-
-            # Log all child elements
-            for i, child in enumerate(root):
-                log.info(
-                    "🏦 XML child %d: tag=%s, attrib=%s, text=%s",
-                    i,
-                    child.tag,
-                    child.attrib,
-                    child.text,
-                )
 
             # Try different XML structures
             for exrate in root.findall(".//Exrate") + root.findall(".//exrate"):
-                log.info(
-                    "🏦 Found exrate element: %s",
-                    ET.tostring(exrate, encoding="unicode"),
-                )
                 currency = exrate.get("CurrencyCode") or (
                     exrate.find("CurrencyCode").text
                     if exrate.find("CurrencyCode") is not None
@@ -209,13 +187,11 @@ class TiGiaBot:
 
         async with aiohttp.ClientSession() as session:
             async with session.get(token_url, timeout=15) as resp:
-                log.info("🥇 Token response: status=%s", resp.status)
                 resp.raise_for_status()
                 token_data = await resp.json()
                 token = token_data.get("results")
                 if not token:
                     raise RuntimeError("Không lấy được token từ vnappmob API")
-                log.info("🥇 Got token: %s...", token[:20])
 
         #  Get gold prices with token
         gold_url = "https://api.vnappmob.com/api/v2/gold/sjc"
