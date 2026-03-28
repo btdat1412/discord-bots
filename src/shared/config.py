@@ -37,6 +37,18 @@ BOT_CONFIGS = [
         ),
         cogs=["src.bots.ti_gia_bot"],
     ),
+    BotCfg(
+        name="gym-rat",
+        token=os.getenv("GYM_RAT_BOT_TOKEN", ""),
+        intents=IntentsCfg(
+            guilds=True,
+            members=True,
+            messages=True,
+            message_content=True,
+            reactions=False,
+        ),
+        cogs=["src.bots.gym_rat_bot"],
+    ),
 ]
 
 

@@ -41,6 +41,7 @@ class BaseBot(commands.Bot):
 
             for g in self.guilds:
                 try:
+                    self.tree.copy_global_to(guild=discord.Object(id=g.id))
                     synced = await self.tree.sync(guild=discord.Object(id=g.id))
                     log.info(
                         "Synced %d commands to guild '%s' (id=%s)",
@@ -55,13 +56,6 @@ class BaseBot(commands.Bot):
                         g.id,
                         e,
                     )
-
-            try:
-                global_synced = await self.tree.sync()
-                log.info("Synced %d commands globally", len(global_synced))
-            except Exception as e:
-                log.error("Failed to sync commands globally: %s", e)
-                raise
 
             self._commands_synced = True
             log.info("Command sync completed successfully")
