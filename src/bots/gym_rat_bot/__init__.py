@@ -4,13 +4,15 @@ import os
 from src.shared.database import Database
 
 from .gym_rat_bot import GymRatBot
+from src.shared.storage import ImageStorage
 
 log = logging.getLogger(__name__)
 
 
 def setup(bot):
     db = Database()
-    GymRatBot(bot, db)
+    storage = ImageStorage()
+    GymRatBot(bot, db, storage)
 
     @bot.event_listener("on_ready")
     async def _init_gym_db():
@@ -23,3 +25,5 @@ def setup(bot):
             log.info("Gym Rat database connected")
         except Exception:
             log.exception("Failed to connect Gym Rat database")
+
+        storage.connect()

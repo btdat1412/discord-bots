@@ -19,19 +19,37 @@ async def get_or_create_user(db: Database, discord_id: int, discord_name: str):
     )
 
 
-async def checkin(db: Database, user_id: int, checkin_date: date) -> bool:
-    """Insert a check-in. Returns True if new, False if duplicate."""
+async def checkin(
+    db: Database, user_id: int, checkin_date: date, image_url: str | None = None
+) -> bool:
+    """Insert a check-in. Returns True if new, False if already existed.
+    If image_url is provided and check-in already exists, updates the image."""
     row = await db.fetchrow(
         """
-        INSERT INTO gym_checkins (user_id, checkin_date)
-        VALUES ($1, $2)
+        INSERT INTO gym_checkins (user_id, checkin_date, image_url)
+        VALUES ($1, $2, $3)
         ON CONFLICT DO NOTHING
         RETURNING id
         """,
         user_id,
         checkin_date,
+        image_url,
     )
-    return row is not None
+    is_new = row is not None
+
+    # If already checked in but user is adding/updating an image
+    if not is_new and image_url:
+        await db.execute(
+            """
+            UPDATE gym_checkins SET image_url = $3
+            WHERE user_id = $1 AND checkin_date = $2
+            """,
+            user_id,
+            checkin_date,
+            image_url,
+        )
+
+    return is_new
 
 
 async def get_checkins_range(
@@ -148,4 +166,16 @@ async def get_monthly_leaderboard(
         start,
         end,
         limit,
+    )
+
+
+async def get_checkins_with_images(db: Database, user_id: int):
+    """Get all check-ins that have images, newest first."""
+    return await db.fetch(
+        """
+        SELECT checkin_date, image_url FROM gym_checkins
+        WHERE user_id = $1 AND image_url IS NOT NULL
+        ORDER BY checkin_date DESC
+        """,
+        user_id,
     )

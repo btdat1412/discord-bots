@@ -10,8 +10,10 @@ from src.shared.database import Database
 
 from . import queries
 from .contribution_graph import render_month_calendar
+from src.shared.storage import ImageStorage
 
 import io
+import aiohttp
 
 log = logging.getLogger(__name__)
 
@@ -27,9 +29,10 @@ def _today() -> date:
 
 class GymRatBot:
 
-    def __init__(self, bot: commands.Bot, db: Database):
+    def __init__(self, bot: commands.Bot, db: Database, storage: ImageStorage = None):
         self.bot = bot
         self.db = db
+        self.storage = storage
         self._register_slash_commands()
         self._register_prefix_commands()
 
@@ -38,18 +41,24 @@ class GymRatBot:
     # ------------------------------------------------------------------ #
 
     def _register_slash_commands(self) -> None:
-        # /checkin and /diemdanh — no params, use bot.slash_command
-        @self.bot.slash_command(
-            name="checkin", description="Check in your gym day"
-        )
-        async def checkin(interaction: discord.Interaction):
-            await self._do_checkin(interaction)
+        # /checkin and /diemdanh — need optional image param, register directly
+        @app_commands.command(name="checkin", description="Check in your gym day")
+        @app_commands.describe(image="Upload a photo of your gym session")
+        async def checkin(
+            interaction: discord.Interaction, image: discord.Attachment = None
+        ):
+            await self._do_checkin(interaction, image)
 
-        @self.bot.slash_command(
-            name="diemdanh", description="Điểm danh tập gym hôm nay"
-        )
-        async def diemdanh(interaction: discord.Interaction):
-            await self._do_checkin(interaction)
+        self.bot.tree.add_command(checkin)
+
+        @app_commands.command(name="diemdanh", description="Điểm danh tập gym hôm nay")
+        @app_commands.describe(image="Upload ảnh tập gym")
+        async def diemdanh(
+            interaction: discord.Interaction, image: discord.Attachment = None
+        ):
+            await self._do_checkin(interaction, image)
+
+        self.bot.tree.add_command(diemdanh)
 
         # /gymhistory — needs optional user param, register directly
         @app_commands.command(
@@ -82,6 +91,18 @@ class GymRatBot:
         async def gymleaderboard(interaction: discord.Interaction):
             await self._do_leaderboard(interaction)
 
+        # /gymgallery — optional user param
+        @app_commands.command(
+            name="gymgallery", description="Browse gym check-in photos"
+        )
+        @app_commands.describe(user="User to view photos for (default: yourself)")
+        async def gymgallery(
+            interaction: discord.Interaction, user: discord.Member = None
+        ):
+            await self._do_gallery(interaction, user)
+
+        self.bot.tree.add_command(gymgallery)
+
     # ------------------------------------------------------------------ #
     #  Prefix commands (!gymrat checkin, !gymrat history, etc.)             #
     # ------------------------------------------------------------------ #
@@ -113,13 +134,32 @@ class GymRatBot:
         async def prefix_leaderboard(ctx: commands.Context):
             await bot_ref._do_leaderboard_prefix(ctx)
 
+        @gymrat_group.command(name="gallery")
+        async def prefix_gallery(ctx: commands.Context, member: discord.Member = None):
+            await bot_ref._do_gallery_prefix(ctx, member)
+
         self.bot.add_command(gymrat_group)
 
     # ------------------------------------------------------------------ #
     #  Core logic (shared by slash and prefix)                             #
     # ------------------------------------------------------------------ #
 
-    async def _do_checkin(self, interaction: discord.Interaction) -> None:
+    async def _upload_attachment(self, attachment: discord.Attachment) -> str | None:
+        """Download a Discord attachment and upload to S3."""
+        if not self.storage or not self.storage.ready:
+            return None
+        try:
+            file_bytes = await attachment.read()
+            return await self.storage.upload(
+                file_bytes, 0, attachment.content_type or "image/png"
+            )
+        except Exception:
+            log.exception("Failed to process attachment")
+            return None
+
+    async def _do_checkin(
+        self, interaction: discord.Interaction, attachment: discord.Attachment = None
+    ) -> None:
         if not self.db.ready:
             await interaction.response.send_message(
                 "Database is not connected yet. Please try again shortly.",
@@ -129,11 +169,15 @@ class GymRatBot:
 
         await interaction.response.defer(thinking=True)
 
+        image_url = None
+        if attachment:
+            image_url = await self._upload_attachment(attachment)
+
         user = await queries.get_or_create_user(
             self.db, interaction.user.id, interaction.user.display_name
         )
         today = _today()
-        is_new = await queries.checkin(self.db, user["id"], today)
+        is_new = await queries.checkin(self.db, user["id"], today, image_url)
 
         total = await queries.get_total_checkins(self.db, user["id"])
         current_streak, longest_streak = await queries.get_streak(
@@ -150,11 +194,17 @@ class GymRatBot:
                 color=discord.Color.green(),
             )
         else:
+            desc = "You already checked in today. Keep it up!"
+            if image_url:
+                desc = "Already checked in today — photo updated!"
             embed = discord.Embed(
                 title="Already Checked In",
-                description="You already checked in today. Keep it up!",
+                description=desc,
                 color=discord.Color.yellow(),
             )
+
+        if image_url:
+            embed.set_image(url=image_url)
 
         embed.add_field(name="Total Days", value=str(total), inline=True)
         embed.add_field(name="Current Streak", value=f"{current_streak} days", inline=True)
@@ -169,11 +219,16 @@ class GymRatBot:
             await ctx.send("Database is not connected yet. Please try again shortly.")
             return
 
+        # Check for image attachments in the message
+        image_url = None
+        if ctx.message.attachments:
+            image_url = await self._upload_attachment(ctx.message.attachments[0])
+
         user = await queries.get_or_create_user(
             self.db, ctx.author.id, ctx.author.display_name
         )
         today = _today()
-        is_new = await queries.checkin(self.db, user["id"], today)
+        is_new = await queries.checkin(self.db, user["id"], today, image_url)
 
         total = await queries.get_total_checkins(self.db, user["id"])
         current_streak, longest_streak = await queries.get_streak(
@@ -190,11 +245,17 @@ class GymRatBot:
                 color=discord.Color.green(),
             )
         else:
+            desc = "You already checked in today. Keep it up!"
+            if image_url:
+                desc = "Already checked in today — photo updated!"
             embed = discord.Embed(
                 title="Already Checked In",
-                description="You already checked in today. Keep it up!",
+                description=desc,
                 color=discord.Color.yellow(),
             )
+
+        if image_url:
+            embed.set_image(url=image_url)
 
         embed.add_field(name="Total Days", value=str(total), inline=True)
         embed.add_field(name="Current Streak", value=f"{current_streak} days", inline=True)
@@ -424,6 +485,84 @@ class GymRatBot:
 
         return embed
 
+    # ------------------------------------------------------------------ #
+    #  Gallery                                                             #
+    # ------------------------------------------------------------------ #
+
+    async def _do_gallery(
+        self, interaction: discord.Interaction, member: discord.Member = None
+    ) -> None:
+        if not self.db.ready:
+            await interaction.response.send_message(
+                "Database is not connected yet.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(thinking=True)
+
+        target = member or interaction.user
+        user = await queries.get_or_create_user(
+            self.db, target.id, target.display_name
+        )
+        photos = await queries.get_checkins_with_images(self.db, user["id"])
+
+        if not photos:
+            await interaction.followup.send(
+                embed=discord.Embed(
+                    title=f"{target.display_name}'s Gym Gallery",
+                    description="No photos yet! Use `/checkin` with an image to add one.",
+                    color=discord.Color.blurple(),
+                )
+            )
+            return
+
+        embed = self._build_gallery_embed(target, photos, 0)
+        view = GalleryView(self, target, photos, 0)
+        await interaction.followup.send(embed=embed, view=view)
+
+    async def _do_gallery_prefix(
+        self, ctx: commands.Context, member: discord.Member = None
+    ) -> None:
+        if not self.db.ready:
+            await ctx.send("Database is not connected yet.")
+            return
+
+        target = member or ctx.author
+        user = await queries.get_or_create_user(
+            self.db, target.id, target.display_name
+        )
+        photos = await queries.get_checkins_with_images(self.db, user["id"])
+
+        if not photos:
+            await ctx.send(
+                embed=discord.Embed(
+                    title=f"{target.display_name}'s Gym Gallery",
+                    description="No photos yet! Use `!gymrat checkin` with an image to add one.",
+                    color=discord.Color.blurple(),
+                )
+            )
+            return
+
+        embed = self._build_gallery_embed(target, photos, 0)
+        view = GalleryView(self, target, photos, 0)
+        await ctx.send(embed=embed, view=view)
+
+    def _build_gallery_embed(
+        self, target, photos: list, index: int
+    ) -> discord.Embed:
+        photo = photos[index]
+        checkin_date = photo["checkin_date"]
+
+        embed = discord.Embed(
+            title=f"{target.display_name}'s Gym Gallery",
+            description=f"**{checkin_date.strftime('%A, %B %d, %Y')}**",
+            color=discord.Color.blurple(),
+        )
+        embed.set_image(url=photo["image_url"])
+        embed.set_footer(text=f"Photo {index + 1} of {len(photos)}")
+
+        return embed
+
 
 class HistoryView(discord.ui.View):
     """< Prev / Next > buttons for navigating months."""
@@ -475,3 +614,46 @@ class HistoryView(discord.ui.View):
             self.target, self.year, self.month
         )
         await interaction.response.edit_message(embed=embed, attachments=[file], view=self)
+
+
+class GalleryView(discord.ui.View):
+    """< Prev / Next > buttons for browsing gym photos."""
+
+    def __init__(
+        self,
+        bot_instance: GymRatBot,
+        target: discord.User | discord.Member,
+        photos: list,
+        index: int,
+    ):
+        super().__init__(timeout=120)
+        self.bot_instance = bot_instance
+        self.target = target
+        self.photos = photos
+        self.index = index
+
+    @discord.ui.button(label="<", style=discord.ButtonStyle.secondary)
+    async def prev_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        if self.index <= 0:
+            await interaction.response.defer()
+            return
+        self.index -= 1
+        embed = self.bot_instance._build_gallery_embed(
+            self.target, self.photos, self.index
+        )
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label=">", style=discord.ButtonStyle.secondary)
+    async def next_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        if self.index >= len(self.photos) - 1:
+            await interaction.response.defer()
+            return
+        self.index += 1
+        embed = self.bot_instance._build_gallery_embed(
+            self.target, self.photos, self.index
+        )
+        await interaction.response.edit_message(embed=embed, view=self)
