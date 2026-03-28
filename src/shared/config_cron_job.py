@@ -16,7 +16,7 @@ def get_ti_gia_jobs() -> List[JobConfig]:
     jobs = []
 
     # Daily morning job
-    channel_id_str = os.getenv("TI_GIA_DAILY_CHANNEL_ID")
+    channel_id_str = os.getenv("TI_GIA_DAILY_CHANNEL_ID", "").strip()
     if channel_id_str:
         try:
             from src.shared.cron_job.ti_gia_jobs import create_daily_morning_job

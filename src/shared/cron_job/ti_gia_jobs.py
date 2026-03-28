@@ -34,11 +34,14 @@ async def daily_ti_gia_job(bot: commands.Bot, channel_id: int, **kwargs):
             log.error("📅 TiGiaBot not found in bot instance")
             return
 
-        # Get the channel
+        # Fetch the channel (get_channel relies on cache which may be empty)
         channel = bot.get_channel(channel_id)
         if not channel:
-            log.error("📅 Cannot find channel with ID %s", channel_id)
-            return
+            try:
+                channel = await bot.fetch_channel(channel_id)
+            except Exception:
+                log.error("📅 Cannot find channel with ID %s", channel_id)
+                return
 
         log.info("📅 Sending daily ti-gia update to channel %s", channel.name)
 
@@ -61,8 +64,8 @@ def create_daily_morning_job(channel_id: int) -> JobConfig:
     """Create a daily morning ti-gia job at 9:00 AM Vietnam time."""
     return JobConfig(
         name="daily_ti_gia",
-        description="Daily ti-gia update at 9:00 AM Vietnam time",
-        schedule_time=vietnam_time(9, 0),
+        description="Daily ti-gia update at 20:50 Vietnam time",
+        schedule_time=vietnam_time(20, 50),
         job_function=daily_ti_gia_job,
         kwargs={"channel_id": channel_id},
     )
