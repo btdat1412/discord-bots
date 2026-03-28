@@ -103,6 +103,13 @@ class GymRatBot:
 
         self.bot.tree.add_command(gymgallery)
 
+        # /gymhelp
+        @self.bot.slash_command(
+            name="gymhelp", description="Hướng dẫn sử dụng Gym Rat"
+        )
+        async def gymhelp(interaction: discord.Interaction):
+            await interaction.response.send_message(embed=self._build_help_embed())
+
     # ------------------------------------------------------------------ #
     #  Prefix commands (!gymrat checkin, !gymrat history, etc.)             #
     # ------------------------------------------------------------------ #
@@ -112,7 +119,7 @@ class GymRatBot:
 
         @commands.group(name="gymrat", invoke_without_command=True)
         async def gymrat_group(ctx: commands.Context):
-            await ctx.send_help(ctx.command)
+            await ctx.send(embed=bot_ref._build_help_embed())
 
         @gymrat_group.command(name="checkin")
         async def prefix_checkin(ctx: commands.Context):
@@ -138,7 +145,79 @@ class GymRatBot:
         async def prefix_gallery(ctx: commands.Context, member: discord.Member = None):
             await bot_ref._do_gallery_prefix(ctx, member)
 
+        @gymrat_group.command(name="help")
+        async def prefix_help(ctx: commands.Context):
+            await ctx.send(embed=bot_ref._build_help_embed())
+
         self.bot.add_command(gymrat_group)
+
+    # ------------------------------------------------------------------ #
+    #  Help                                                                #
+    # ------------------------------------------------------------------ #
+
+    def _build_help_embed(self) -> discord.Embed:
+        embed = discord.Embed(
+            title="Gym Rat - Hướng dẫn sử dụng",
+            description="Bot điểm danh tập gym hàng ngày. Theo dõi streak, xem lịch sử và so sánh với bạn bè!",
+            color=discord.Color.green(),
+        )
+
+        embed.add_field(
+            name="Điểm danh",
+            value=(
+                "`/checkin` hoặc `/diemdanh` — Điểm danh hôm nay\n"
+                "`/checkin` → chọn ô `image` → đính kèm ảnh tập gym\n"
+                "`!gymrat checkin` — Điểm danh bằng prefix (đính kèm ảnh vào tin nhắn)\n"
+                "\n"
+                "Mỗi ngày chỉ tính **1 lần** điểm danh. "
+                "Nếu muốn thêm/đổi ảnh, gửi lại lệnh kèm ảnh mới."
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Xem lịch sử",
+            value=(
+                "`/gymhistory` — Xem lịch tập gym theo tháng\n"
+                "`/gymhistory user:@tên` — Xem lịch của người khác\n"
+                "`!gymrat history` — Xem bằng prefix"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Thống kê",
+            value=(
+                "`/gymstats` — Xem thống kê cá nhân (tổng ngày, streak, tháng này)\n"
+                "`/gymstats user:@tên` — Xem thống kê người khác\n"
+                "`!gymrat stats` — Xem bằng prefix"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Bảng xếp hạng",
+            value=(
+                "`/gymleaderboard` — Top 10 người tập nhiều nhất\n"
+                "`!gymrat leaderboard` — Xem bằng prefix"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Thư viện ảnh",
+            value=(
+                "`/gymgallery` — Xem lại ảnh tập gym đã upload\n"
+                "`/gymgallery user:@tên` — Xem ảnh người khác\n"
+                "`!gymrat gallery` — Xem bằng prefix"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Trợ giúp",
+            value=(
+                "`/gymhelp` hoặc `!gymrat help` — Hiển thị hướng dẫn này"
+            ),
+            inline=False,
+        )
+
+        return embed
 
     # ------------------------------------------------------------------ #
     #  Core logic (shared by slash and prefix)                             #
