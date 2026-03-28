@@ -17,10 +17,10 @@ TEXT_COLOR = (255, 255, 255)  # White text
 TITLE_COLOR = (255, 255, 255)  # White title
 
 # Layout
-CELL_SIZE = 40
+CELL_SIZE = 44
 CELL_GAP = 6
-PADDING = 24
-HEADER_HEIGHT = 70  # Space for month title + day labels
+PADDING = 28
+HEADER_HEIGHT = 90  # Space for month title + day labels
 DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 CORNER_RADIUS = 6
 
@@ -48,14 +48,14 @@ def render_month_calendar(checkin_dates: set[date], year: int, month: int) -> io
 
     # Try to load a nice font, fall back to default
     try:
-        title_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 20)
-        label_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 13)
-        day_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 12)
+        title_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 28)
+        label_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 16)
+        day_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 14)
     except (OSError, IOError):
         try:
-            title_font = ImageFont.truetype("DejaVuSans.ttf", 20)
-            label_font = ImageFont.truetype("DejaVuSans.ttf", 13)
-            day_font = ImageFont.truetype("DejaVuSans.ttf", 12)
+            title_font = ImageFont.truetype("DejaVuSans.ttf", 28)
+            label_font = ImageFont.truetype("DejaVuSans.ttf", 16)
+            day_font = ImageFont.truetype("DejaVuSans.ttf", 14)
         except (OSError, IOError):
             title_font = ImageFont.load_default()
             label_font = title_font
@@ -68,7 +68,7 @@ def render_month_calendar(checkin_dates: set[date], year: int, month: int) -> io
     draw.text((title_x, PADDING), title, fill=TITLE_COLOR, font=title_font)
 
     # Draw day labels
-    label_y = PADDING + 35
+    label_y = PADDING + 50
     for i, label in enumerate(DAY_LABELS):
         x = PADDING + i * (CELL_SIZE + CELL_GAP)
         label_bbox = draw.textbbox((0, 0), label, font=label_font)
