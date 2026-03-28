@@ -1,7 +1,9 @@
 import asyncio
 import logging
 import re
+from datetime import datetime
 from typing import Optional, Tuple
+from zoneinfo import ZoneInfo
 
 import aiohttp
 import discord
@@ -20,11 +22,14 @@ class TiGiaBot:
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._register_slash()
+        self._register_prefix()
+
+    GAS_URL = "https://giaxanghomnay.com/api/pvdate/{date}"
 
     # ---------------- Commands ----------------
     def _register_slash(self) -> None:
         @self.bot.slash_command(
-            name="ti-gia", description="Xem tỉ giá USD/VND (VCB) và giá vàng SJC"
+            name="ti-gia", description="Tỉ giá, vàng, Bitcoin, xăng"
         )
         async def ti_gia(interaction: discord.Interaction):
             await interaction.response.defer(thinking=True)
@@ -36,22 +41,42 @@ class TiGiaBot:
                 log.exception("Error in /ti-gia")
                 await interaction.followup.send(f"Đã xảy ra lỗi: {e}")
 
+    def _register_prefix(self) -> None:
+        bot_ref = self
+
+        @self.bot.command(name="tigia")
+        async def prefix_tigia(ctx: commands.Context):
+            await bot_ref._do_tigia_prefix(ctx)
+
+        @self.bot.command(name="ti-gia")
+        async def prefix_ti_gia(ctx: commands.Context):
+            await bot_ref._do_tigia_prefix(ctx)
+
+    async def _do_tigia_prefix(self, ctx: commands.Context) -> None:
+        try:
+            embed = await self.execute_ti_gia()
+            await ctx.send(embed=embed)
+        except Exception as e:
+            log.exception("Error in !tigia")
+            await ctx.send(f"Đã xảy ra lỗi: {e}")
+
     COINGECKO_URL = (
         "https://api.coingecko.com/api/v3/simple/price"
         "?ids=bitcoin&vs_currencies=usd,vnd&include_24hr_change=true"
     )
 
     async def execute_ti_gia(
-        self, title: str = "Tỉ giá & Giá vàng", footer: Optional[str] = None
+        self, title: str = "Tỉ giá & Giá vàng & Bitcoin & Giá xăng", footer: Optional[str] = None
     ) -> discord.Embed:
 
         try:
             usd_task = self._fetch_vcb_usd()
             gold_task = self._fetch_sjc_gold()
             btc_task = self._fetch_btc_price()
+            gas_task = self._fetch_gas_price()
 
-            usd, gold, btc = await asyncio.gather(
-                usd_task, gold_task, btc_task, return_exceptions=True
+            usd, gold, btc, gas = await asyncio.gather(
+                usd_task, gold_task, btc_task, gas_task, return_exceptions=True
             )
 
             usd_text = (
@@ -69,16 +94,22 @@ class TiGiaBot:
                 if not isinstance(btc, Exception)
                 else f"❌ CoinGecko lỗi: {btc}"
             )
+            gas_text = (
+                self._format_gas_text(gas)
+                if not isinstance(gas, Exception)
+                else f"❌ Giá xăng lỗi: {gas}"
+            )
 
             embed = discord.Embed(
                 title=title,
-                description="Nguồn: Vietcombank, SJC, CoinGecko",
+                description="Nguồn: Vietcombank, SJC, CoinGecko, Petrolimex",
                 color=discord.Color.gold(),
             )
             embed.add_field(
                 name="💵 USD/VND (Vietcombank)", value=usd_text, inline=False
             )
             embed.add_field(name="🏅 Giá vàng SJC", value=gold_text, inline=False)
+            embed.add_field(name="⛽ Giá xăng dầu", value=gas_text, inline=False)
             embed.add_field(name="₿ Bitcoin", value=btc_text, inline=False)
 
             if footer:
@@ -251,7 +282,36 @@ class TiGiaBot:
                 )
                 return btc
 
+    async def _fetch_gas_price(self) -> list:
+        """Fetch gas prices from giaxanghomnay.com. Returns first array (Petrolimex)."""
+        today = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).strftime("%Y-%m-%d")
+        url = self.GAS_URL.format(date=today)
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=15) as resp:
+                resp.raise_for_status()
+                data = await resp.json()
+                if not data or not data[0]:
+                    raise RuntimeError("Không có dữ liệu giá xăng")
+                log.info("⛽ Fetched %d gas prices", len(data[0]))
+                return data[0]  # First array = Petrolimex
+
     # ---------------- Formatting ----------------
+    def _format_gas_text(self, gas_list: list) -> str:
+        # Show RON 95, E5 RON 92, and Diesel
+        targets = {
+            "Xăng RON 95-V": "RON 95",
+            "Xăng RON 95-III": "RON 95-III",
+            "Xăng E5 RON 92-II": "E5 RON 92",
+            "DO 0,05S-II": "Dầu Diesel",
+        }
+        lines = []
+        for item in gas_list:
+            title = item.get("title", "")
+            if title in targets:
+                price = item.get("zone1_price", 0)
+                lines.append(f"**{targets[title]}:** {price:,} VND/lít")
+        return "\n".join(lines) if lines else "Không có dữ liệu"
+
     def _format_btc_text(self, btc: dict) -> str:
         usd_price = btc.get("usd", 0)
         vnd_price = btc.get("vnd", 0)
@@ -260,13 +320,9 @@ class TiGiaBot:
         usd_formatted = f"{usd_price:,.0f}"
         vnd_formatted = f"{vnd_price:,.0f}"
 
-        arrow = "🟢" if change_24h >= 0 else "🔴"
-        change_str = f"{arrow} {change_24h:+.2f}%"
-
         return (
             f"**USD:** ${usd_formatted}\n"
-            f"**VND:** {vnd_formatted} VND\n"
-            f"**24h:** {change_str}"
+            f"**VND:** {vnd_formatted} VND"
         )
 
     def _format_usd_text(self, usd_tuple: Tuple[str, str, str]) -> str:

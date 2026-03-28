@@ -28,11 +28,10 @@ BOT_CONFIGS = [
         name="ti-gia",
         token=os.getenv("TI_GIA_BOT_TOKEN", ""),
         intents=IntentsCfg(
-            # intents = permissions of the bot
             guilds=True,
             members=False,
             messages=True,
-            message_content=False,
+            message_content=True,
             reactions=True,
         ),
         cogs=["src.bots.ti_gia_bot"],
