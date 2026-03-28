@@ -8,6 +8,7 @@ import boto3
 log = logging.getLogger(__name__)
 
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+PRESIGN_EXPIRY = 604800  # 7 days (S3 max)
 
 
 class ImageStorage:
@@ -46,7 +47,7 @@ class ImageStorage:
     async def upload(
         self, file_bytes: bytes, discord_id: int, content_type: str = "image/png"
     ) -> str | None:
-        """Upload image bytes and return the public URL."""
+        """Upload image bytes. Returns the S3 key (not a URL)."""
         if not self.ready:
             return None
 
@@ -67,11 +68,23 @@ class ImageStorage:
                 Key=key,
                 Body=file_bytes,
                 ContentType=content_type,
-                ACL="public-read",
             )
-            url = f"{self._endpoint}/{self._bucket}/{key}"
             log.info("Uploaded image: %s", key)
-            return url
+            return key
         except Exception:
             log.exception("Failed to upload image")
+            return None
+
+    def get_url(self, key: str) -> str | None:
+        """Generate a presigned URL for an S3 key."""
+        if not self.ready or not key:
+            return None
+        try:
+            return self._client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": self._bucket, "Key": key},
+                ExpiresIn=PRESIGN_EXPIRY,
+            )
+        except Exception:
+            log.exception("Failed to generate presigned URL for %s", key)
             return None

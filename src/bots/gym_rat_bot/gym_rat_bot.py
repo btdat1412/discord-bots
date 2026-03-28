@@ -171,15 +171,15 @@ class GymRatBot:
 
         await interaction.response.defer(thinking=True)
 
-        image_url = None
+        image_key = None
         if attachment:
-            image_url = await self._upload_attachment(attachment, interaction.user.id)
+            image_key = await self._upload_attachment(attachment, interaction.user.id)
 
         user = await queries.get_or_create_user(
             self.db, interaction.user.id, interaction.user.display_name
         )
         today = _today()
-        is_new = await queries.checkin(self.db, user["id"], today, image_url)
+        is_new = await queries.checkin(self.db, user["id"], today, image_key)
 
         total = await queries.get_total_checkins(self.db, user["id"])
         current_streak, longest_streak = await queries.get_streak(
@@ -197,7 +197,7 @@ class GymRatBot:
             )
         else:
             desc = "You already checked in today. Keep it up!"
-            if image_url:
+            if image_key:
                 desc = "Already checked in today — photo updated!"
             embed = discord.Embed(
                 title="Already Checked In",
@@ -205,8 +205,10 @@ class GymRatBot:
                 color=discord.Color.yellow(),
             )
 
-        if image_url:
-            embed.set_image(url=image_url)
+        if image_key and self.storage:
+            presigned = self.storage.get_url(image_key)
+            if presigned:
+                embed.set_image(url=presigned)
 
         embed.add_field(name="Total Days", value=str(total), inline=True)
         embed.add_field(name="Current Streak", value=f"{current_streak} days", inline=True)
@@ -222,15 +224,15 @@ class GymRatBot:
             return
 
         # Check for image attachments in the message
-        image_url = None
+        image_key = None
         if ctx.message.attachments:
-            image_url = await self._upload_attachment(ctx.message.attachments[0], ctx.author.id)
+            image_key = await self._upload_attachment(ctx.message.attachments[0], ctx.author.id)
 
         user = await queries.get_or_create_user(
             self.db, ctx.author.id, ctx.author.display_name
         )
         today = _today()
-        is_new = await queries.checkin(self.db, user["id"], today, image_url)
+        is_new = await queries.checkin(self.db, user["id"], today, image_key)
 
         total = await queries.get_total_checkins(self.db, user["id"])
         current_streak, longest_streak = await queries.get_streak(
@@ -248,7 +250,7 @@ class GymRatBot:
             )
         else:
             desc = "You already checked in today. Keep it up!"
-            if image_url:
+            if image_key:
                 desc = "Already checked in today — photo updated!"
             embed = discord.Embed(
                 title="Already Checked In",
@@ -256,8 +258,10 @@ class GymRatBot:
                 color=discord.Color.yellow(),
             )
 
-        if image_url:
-            embed.set_image(url=image_url)
+        if image_key and self.storage:
+            presigned = self.storage.get_url(image_key)
+            if presigned:
+                embed.set_image(url=presigned)
 
         embed.add_field(name="Total Days", value=str(total), inline=True)
         embed.add_field(name="Current Streak", value=f"{current_streak} days", inline=True)
@@ -554,13 +558,19 @@ class GymRatBot:
     ) -> discord.Embed:
         photo = photos[index]
         checkin_date = photo["checkin_date"]
+        image_key = photo["image_url"]  # stored as S3 key
 
         embed = discord.Embed(
             title=f"{target.display_name}'s Gym Gallery",
             description=f"**{checkin_date.strftime('%A, %B %d, %Y')}**",
             color=discord.Color.blurple(),
         )
-        embed.set_image(url=photo["image_url"])
+
+        if self.storage and image_key:
+            presigned = self.storage.get_url(image_key)
+            if presigned:
+                embed.set_image(url=presigned)
+
         embed.set_footer(text=f"Photo {index + 1} of {len(photos)}")
 
         return embed
