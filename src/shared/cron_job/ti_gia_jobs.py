@@ -64,8 +64,8 @@ def create_daily_morning_job(channel_id: int) -> JobConfig:
     """Create a daily morning ti-gia job at 9:00 AM Vietnam time."""
     return JobConfig(
         name="daily_ti_gia",
-        description="Daily ti-gia update at 20:50 Vietnam time",
-        schedule_time=vietnam_time(20, 50),
+        description="Daily ti-gia update at 21:00 Vietnam time",
+        schedule_time=vietnam_time(21, 0),
         job_function=daily_ti_gia_job,
         kwargs={"channel_id": channel_id},
     )

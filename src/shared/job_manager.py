@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Callable, Any
 from datetime import time
 from dataclasses import dataclass
 
-import pytz
+from zoneinfo import ZoneInfo
 from discord.ext import tasks, commands
 
 log = logging.getLogger(__name__)
@@ -164,7 +164,7 @@ class CronJobManager:
 # Utility functions for creating common job schedules
 def daily_at(hour: int, minute: int = 0, timezone: str = "Asia/Ho_Chi_Minh") -> time:
     """Create a daily schedule time."""
-    tz = pytz.timezone(timezone)
+    tz = ZoneInfo(timezone)
     return time(hour=hour, minute=minute, tzinfo=tz)
 
 
