@@ -15,7 +15,6 @@ log = logging.getLogger(__name__)
 def get_ti_gia_jobs() -> List[JobConfig]:
     jobs = []
 
-    # Daily morning job
     channel_id_str = os.getenv("TI_GIA_DAILY_CHANNEL_ID", "").strip()
     if channel_id_str:
         try:
@@ -30,12 +29,27 @@ def get_ti_gia_jobs() -> List[JobConfig]:
     return jobs
 
 
+def get_gym_rat_jobs() -> List[JobConfig]:
+    jobs = []
+
+    channel_id_str = os.getenv("GYM_RAT_DAILY_CHANNEL_ID", "").strip()
+    if channel_id_str:
+        try:
+            from src.shared.cron_job.gym_rat_jobs import create_daily_reminder_job
+
+            channel_id = int(channel_id_str)
+            jobs.append(create_daily_reminder_job(channel_id))
+            log.info("🔧 Configured daily gym reminder for channel: %s", channel_id)
+        except ValueError:
+            log.error("🔧 Invalid GYM_RAT_DAILY_CHANNEL_ID: %s", channel_id_str)
+
+    return jobs
+
+
 # Bot name to job configuration function mapping
 BOT_CRON_MAPPINGS = {
     "ti-gia": get_ti_gia_jobs,
-    # "crypto-bot": get_crypto_jobs,
-    # "weather-bot": get_weather_jobs,
-    # Add more bots here...
+    "gym-rat": get_gym_rat_jobs,
 }
 
 

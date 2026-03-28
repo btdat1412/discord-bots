@@ -12,7 +12,7 @@ log = logging.getLogger(__name__)
 def setup(bot):
     db = Database()
     storage = ImageStorage()
-    GymRatBot(bot, db, storage)
+    bot.gym_rat_bot = GymRatBot(bot, db, storage)
 
     @bot.event_listener("on_ready")
     async def _init_gym_db():
