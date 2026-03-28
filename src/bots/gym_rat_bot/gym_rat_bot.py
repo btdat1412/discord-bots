@@ -144,14 +144,16 @@ class GymRatBot:
     #  Core logic (shared by slash and prefix)                             #
     # ------------------------------------------------------------------ #
 
-    async def _upload_attachment(self, attachment: discord.Attachment) -> str | None:
+    async def _upload_attachment(
+        self, attachment: discord.Attachment, discord_id: int
+    ) -> str | None:
         """Download a Discord attachment and upload to S3."""
         if not self.storage or not self.storage.ready:
             return None
         try:
             file_bytes = await attachment.read()
             return await self.storage.upload(
-                file_bytes, 0, attachment.content_type or "image/png"
+                file_bytes, discord_id, attachment.content_type or "image/png"
             )
         except Exception:
             log.exception("Failed to process attachment")
@@ -171,7 +173,7 @@ class GymRatBot:
 
         image_url = None
         if attachment:
-            image_url = await self._upload_attachment(attachment)
+            image_url = await self._upload_attachment(attachment, interaction.user.id)
 
         user = await queries.get_or_create_user(
             self.db, interaction.user.id, interaction.user.display_name
@@ -222,7 +224,7 @@ class GymRatBot:
         # Check for image attachments in the message
         image_url = None
         if ctx.message.attachments:
-            image_url = await self._upload_attachment(ctx.message.attachments[0])
+            image_url = await self._upload_attachment(ctx.message.attachments[0], ctx.author.id)
 
         user = await queries.get_or_create_user(
             self.db, ctx.author.id, ctx.author.display_name

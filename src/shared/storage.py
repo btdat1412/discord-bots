@@ -67,6 +67,7 @@ class ImageStorage:
                 Key=key,
                 Body=file_bytes,
                 ContentType=content_type,
+                ACL="public-read",
             )
             url = f"{self._endpoint}/{self._bucket}/{key}"
             log.info("Uploaded image: %s", key)
