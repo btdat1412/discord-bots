@@ -36,6 +36,11 @@ class TiGiaBot:
                 log.exception("Error in /ti-gia")
                 await interaction.followup.send(f"Đã xảy ra lỗi: {e}")
 
+    COINGECKO_URL = (
+        "https://api.coingecko.com/api/v3/simple/price"
+        "?ids=bitcoin&vs_currencies=usd,vnd&include_24hr_change=true"
+    )
+
     async def execute_ti_gia(
         self, title: str = "Tỉ giá & Giá vàng", footer: Optional[str] = None
     ) -> discord.Embed:
@@ -43,9 +48,10 @@ class TiGiaBot:
         try:
             usd_task = self._fetch_vcb_usd()
             gold_task = self._fetch_sjc_gold()
+            btc_task = self._fetch_btc_price()
 
-            usd, gold = await asyncio.gather(
-                usd_task, gold_task, return_exceptions=True
+            usd, gold, btc = await asyncio.gather(
+                usd_task, gold_task, btc_task, return_exceptions=True
             )
 
             usd_text = (
@@ -58,16 +64,22 @@ class TiGiaBot:
                 if not isinstance(gold, Exception)
                 else f"❌ SJC lỗi: {gold}"
             )
+            btc_text = (
+                self._format_btc_text(btc)
+                if not isinstance(btc, Exception)
+                else f"❌ CoinGecko lỗi: {btc}"
+            )
 
             embed = discord.Embed(
                 title=title,
-                description="Nguồn: Vietcombank, SJC",
+                description="Nguồn: Vietcombank, SJC, CoinGecko",
                 color=discord.Color.gold(),
             )
             embed.add_field(
                 name="💵 USD/VND (Vietcombank)", value=usd_text, inline=False
             )
             embed.add_field(name="🏅 Giá vàng SJC", value=gold_text, inline=False)
+            embed.add_field(name="₿ Bitcoin", value=btc_text, inline=False)
 
             if footer:
                 embed.set_footer(text=footer)
@@ -222,7 +234,41 @@ class TiGiaBot:
                 )
                 return (buy_formatted, sell_formatted)
 
+    async def _fetch_btc_price(self) -> dict:
+        """Fetch Bitcoin price from CoinGecko. Returns dict with usd, vnd, change."""
+        async with aiohttp.ClientSession() as session:
+            async with session.get(self.COINGECKO_URL, timeout=15) as resp:
+                resp.raise_for_status()
+                data = await resp.json()
+                btc = data.get("bitcoin", {})
+                if not btc:
+                    raise RuntimeError("Không có dữ liệu Bitcoin từ CoinGecko")
+                log.info(
+                    "₿ BTC - USD: %s, VND: %s, 24h: %s%%",
+                    btc.get("usd"),
+                    btc.get("vnd"),
+                    btc.get("usd_24h_change"),
+                )
+                return btc
+
     # ---------------- Formatting ----------------
+    def _format_btc_text(self, btc: dict) -> str:
+        usd_price = btc.get("usd", 0)
+        vnd_price = btc.get("vnd", 0)
+        change_24h = btc.get("usd_24h_change", 0)
+
+        usd_formatted = f"{usd_price:,.0f}"
+        vnd_formatted = f"{vnd_price:,.0f}"
+
+        arrow = "🟢" if change_24h >= 0 else "🔴"
+        change_str = f"{arrow} {change_24h:+.2f}%"
+
+        return (
+            f"**USD:** ${usd_formatted}\n"
+            f"**VND:** {vnd_formatted} VND\n"
+            f"**24h:** {change_str}"
+        )
+
     def _format_usd_text(self, usd_tuple: Tuple[str, str, str]) -> str:
         buy, transfer, sell = usd_tuple
         # Clean up decimal places and format
