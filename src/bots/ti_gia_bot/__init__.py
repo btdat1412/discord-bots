@@ -2,4 +2,4 @@ from .ti_gia_bot import TiGiaBot
 
 
 def setup(bot):
-    TiGiaBot(bot)
+    bot.ti_gia_bot = TiGiaBot(bot)
