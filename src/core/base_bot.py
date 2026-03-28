@@ -57,6 +57,11 @@ class BaseBot(commands.Bot):
                         e,
                     )
 
+            # Clear old global commands to avoid duplicates
+            self.tree.clear_commands(guild=None)
+            await self.tree.sync()
+            log.info("Cleared stale global commands")
+
             self._commands_synced = True
             log.info("Command sync completed successfully")
         except Exception:
