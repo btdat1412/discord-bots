@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import discord
@@ -37,28 +37,59 @@ async def daily_gym_reminder(bot: commands.Bot, channel_id: int, **kwargs):
         from src.bots.gym_rat_bot import queries
 
         today = datetime.now(VN_TZ).date()
-        slackers = await queries.get_slackers(gym_rat.db, today, min_skip_days=3)
 
-        if not slackers:
-            log.info("📅 No slackers found, everyone is legit 💪")
+        # Get members currently in the gym channel
+        # For text channels, get members who can see the channel
+        channel_members = channel.members  # people who can see this channel
+        # Filter out bots
+        channel_members = [m for m in channel_members if not m.bot]
+
+        if not channel_members:
+            log.info("📅 No members in gym channel, skipping legit check")
             return
 
-        for slacker in slackers:
-            discord_id = slacker["discord_id"]
-            last_checkin = slacker["last_checkin"]
-            days_missed = (today - last_checkin).days
+        found = 0
+        for member in channel_members:
+            # Check their last check-in
+            user = await queries.get_or_create_user(
+                gym_rat.db, member.id, member.display_name
+            )
+            total = await queries.get_total_checkins(gym_rat.db, user["id"])
 
-            # Try to get current display name
-            try:
-                member = bot.get_user(discord_id) or await bot.fetch_user(discord_id)
-                name = member.display_name
-            except Exception:
-                name = slacker["discord_name"]
+            # Skip if they've never checked in (new member)
+            if total == 0:
+                continue
+
+            current_streak, _ = await queries.get_streak(gym_rat.db, user["id"], today)
+
+            # Get last check-in date
+            checkins = await queries.get_checkins_range(
+                gym_rat.db, user["id"],
+                today - timedelta(days=30), today,
+            )
+            if checkins:
+                last_checkin = max(checkins)
+                days_missed = (today - last_checkin).days
+            else:
+                # No check-in in last 30 days, find the actual last one
+                all_checkins = await queries.get_checkins_range(
+                    gym_rat.db, user["id"],
+                    today - timedelta(days=365), today,
+                )
+                if all_checkins:
+                    last_checkin = max(all_checkins)
+                    days_missed = (today - last_checkin).days
+                else:
+                    continue
+
+            # Only flag if 3+ days missed
+            if days_missed < 3:
+                continue
 
             embed = discord.Embed(
                 title="⚠️ Gym Legit Check",
                 description=(
-                    f"**{name}** đã **{days_missed} ngày** không điểm danh!\n"
+                    f"**{member.display_name}** đã **{days_missed} ngày** không điểm danh!\n"
                     f"Lần cuối check-in: **{last_checkin.strftime('%d/%m/%Y')}**\n\n"
                     f"Kick con ghệ này hay không?\n"
                     f"👍 = Kick | 👎 = Tha"
@@ -69,8 +100,12 @@ async def daily_gym_reminder(bot: commands.Bot, channel_id: int, **kwargs):
             msg = await channel.send(embed=embed)
             await msg.add_reaction("👍")
             await msg.add_reaction("👎")
+            found += 1
 
-        log.info("📅 Legit check done, found %d slacker(s)", len(slackers))
+        if found == 0:
+            log.info("📅 No slackers found, everyone is legit 💪")
+        else:
+            log.info("📅 Legit check done, found %d slacker(s)", found)
 
     except Exception as e:
         log.exception("📅 Error in daily gym reminder: %s", e)

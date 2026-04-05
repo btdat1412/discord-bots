@@ -187,15 +187,15 @@ async def get_slackers(db: Database, today: date, min_skip_days: int = 3):
     Returns list of records with discord_id, discord_name, and last_checkin.
     Only includes users who have checked in at least once (active members).
     """
+    cutoff = today - timedelta(days=min_skip_days)
     return await db.fetch(
         """
         SELECT u.discord_id, u.discord_name, MAX(c.checkin_date) as last_checkin
         FROM gym_users u
         JOIN gym_checkins c ON c.user_id = u.id
         GROUP BY u.id, u.discord_id, u.discord_name
-        HAVING MAX(c.checkin_date) <= $1 - $2::int
+        HAVING MAX(c.checkin_date) <= $1
         ORDER BY MAX(c.checkin_date) ASC
         """,
-        today,
-        min_skip_days,
+        cutoff,
     )
