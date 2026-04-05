@@ -179,3 +179,23 @@ async def get_checkins_with_images(db: Database, user_id: int):
         """,
         user_id,
     )
+
+
+async def get_slackers(db: Database, today: date, min_skip_days: int = 3):
+    """Find users who have skipped 3+ consecutive days (no check-in).
+
+    Returns list of records with discord_id, discord_name, and last_checkin.
+    Only includes users who have checked in at least once (active members).
+    """
+    return await db.fetch(
+        """
+        SELECT u.discord_id, u.discord_name, MAX(c.checkin_date) as last_checkin
+        FROM gym_users u
+        JOIN gym_checkins c ON c.user_id = u.id
+        GROUP BY u.id, u.discord_id, u.discord_name
+        HAVING MAX(c.checkin_date) <= $1 - $2::int
+        ORDER BY MAX(c.checkin_date) ASC
+        """,
+        today,
+        min_skip_days,
+    )

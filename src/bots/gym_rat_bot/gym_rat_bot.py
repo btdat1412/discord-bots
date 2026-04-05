@@ -110,6 +110,16 @@ class GymRatBot:
         async def gymhelp(interaction: discord.Interaction):
             await interaction.response.send_message(embed=self._build_help_embed())
 
+        # /gymlegitcheck — manually trigger the cron legit check
+        @self.bot.slash_command(
+            name="gymlegitcheck", description="Kiểm tra ai trốn tập gym"
+        )
+        async def gymlegitcheck(interaction: discord.Interaction):
+            await interaction.response.defer(thinking=True)
+            from src.shared.cron_job.gym_rat_jobs import daily_gym_reminder
+            await daily_gym_reminder(self.bot, interaction.channel_id)
+            await interaction.followup.send("Đã kiểm tra xong!", ephemeral=True)
+
     # ------------------------------------------------------------------ #
     #  Prefix commands (!gymrat checkin, !gymrat history, etc.)             #
     # ------------------------------------------------------------------ #
