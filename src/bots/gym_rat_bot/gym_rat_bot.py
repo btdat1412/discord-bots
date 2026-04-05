@@ -13,11 +13,13 @@ from .contribution_graph import render_month_calendar
 from src.shared.storage import ImageStorage
 
 import io
+import os
 import aiohttp
 
 log = logging.getLogger(__name__)
 
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+GYM_CHANNEL_ID = int(os.getenv("GYM_RAT_DAILY_CHANNEL_ID", "0"))
 MEDALS = ["🥇", "🥈", "🥉"]
 
 
@@ -587,6 +589,13 @@ class GymRatBot:
     async def _do_gallery(
         self, interaction: discord.Interaction, member: discord.Member = None
     ) -> None:
+        if GYM_CHANNEL_ID and interaction.channel_id != GYM_CHANNEL_ID:
+            await interaction.response.send_message(
+                f"Chỉ dùng được trong <#{GYM_CHANNEL_ID}> thôi nhé!",
+                ephemeral=True,
+            )
+            return
+
         if not self.db.ready:
             await interaction.response.send_message(
                 "Database is not connected yet.", ephemeral=True
@@ -618,6 +627,10 @@ class GymRatBot:
     async def _do_gallery_prefix(
         self, ctx: commands.Context, member: discord.Member = None
     ) -> None:
+        if GYM_CHANNEL_ID and ctx.channel.id != GYM_CHANNEL_ID:
+            await ctx.send(f"Chỉ dùng được trong <#{GYM_CHANNEL_ID}> thôi nhé!")
+            return
+
         if not self.db.ready:
             await ctx.send("Database is not connected yet.")
             return
