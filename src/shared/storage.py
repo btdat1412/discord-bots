@@ -12,12 +12,13 @@ PRESIGN_EXPIRY = 604800  # 7 days (S3 max)
 
 
 class ImageStorage:
-    """Upload images to Railway S3-compatible bucket."""
+    """Upload images to an S3-compatible bucket (Cloudflare R2, AWS S3, etc.)."""
 
     def __init__(self):
         self._client = None
         self._bucket = None
         self._endpoint = None
+        self._public_base_url = None
 
     @property
     def ready(self) -> bool:
@@ -35,6 +36,12 @@ class ImageStorage:
 
         self._endpoint = endpoint
         self._bucket = bucket
+        # Public base URL (e.g. https://pub-xxx.r2.dev or https://img.domain).
+        # When set, get_url() returns "{base}/{key}" so Discord/CDN can cache.
+        # When unset, falls back to presigned URLs.
+        public_base = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+        self._public_base_url = public_base or None
+
         self._client = boto3.client(
             "s3",
             endpoint_url=endpoint,
@@ -42,7 +49,8 @@ class ImageStorage:
             aws_secret_access_key=secret_key,
             region_name="auto",
         )
-        log.info("S3 storage connected (bucket: %s)", bucket)
+        mode = "public-url" if self._public_base_url else "presigned"
+        log.info("S3 storage connected (bucket: %s, mode: %s)", bucket, mode)
 
     async def upload(
         self, file_bytes: bytes, discord_id: int, content_type: str = "image/png"
@@ -76,9 +84,15 @@ class ImageStorage:
             return None
 
     def get_url(self, key: str) -> str | None:
-        """Generate a presigned URL for an S3 key."""
+        """Return a URL for an S3 key.
+
+        Uses PUBLIC_BASE_URL when set (cacheable at CDN edge), otherwise
+        falls back to a 7-day presigned URL.
+        """
         if not self.ready or not key:
             return None
+        if self._public_base_url:
+            return f"{self._public_base_url}/{key}"
         try:
             return self._client.generate_presigned_url(
                 "get_object",
