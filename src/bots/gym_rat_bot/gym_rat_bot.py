@@ -12,9 +12,16 @@ from . import queries
 from .contribution_graph import render_month_calendar
 from src.shared.storage import ImageStorage
 
+import asyncio
 import io
 import os
+
 import aiohttp
+from PIL import Image
+
+MAX_IMAGE_DIMENSION = 2048
+COMPRESS_QUALITY = 85
+COMPRESS_THRESHOLD_BYTES = 500 * 1024  # only compress if file is over ~500 KB
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +34,35 @@ def _today() -> date:
     from datetime import datetime
 
     return datetime.now(VN_TZ).date()
+
+
+def _compress_image(
+    file_bytes: bytes, content_type: str
+) -> tuple[bytes | None, str]:
+    """Resize + re-encode an image as JPEG. Returns (bytes, content_type).
+
+    Returns (None, content_type) if the image can't be processed or is animated
+    so the caller falls back to the original bytes.
+    """
+    try:
+        img = Image.open(io.BytesIO(file_bytes))
+        if getattr(img, "is_animated", False):
+            return None, content_type
+        if img.mode in ("RGBA", "LA", "P"):
+            background = Image.new("RGB", img.size, (255, 255, 255))
+            background.paste(img.convert("RGBA"), mask=img.convert("RGBA").split()[-1])
+            img = background
+        elif img.mode != "RGB":
+            img = img.convert("RGB")
+        img.thumbnail(
+            (MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION), Image.Resampling.LANCZOS
+        )
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=COMPRESS_QUALITY, optimize=True)
+        return buf.getvalue(), "image/jpeg"
+    except Exception:
+        log.exception("Image compression failed; falling back to original")
+        return None, content_type
 
 
 class GymRatBot:
@@ -238,14 +274,22 @@ class GymRatBot:
     async def _upload_attachment(
         self, attachment: discord.Attachment, discord_id: int
     ) -> str | None:
-        """Download a Discord attachment and upload to S3."""
+        """Download a Discord attachment, compress it, and upload to S3."""
         if not self.storage or not self.storage.ready:
             return None
         try:
             file_bytes = await attachment.read()
-            return await self.storage.upload(
-                file_bytes, discord_id, attachment.content_type or "image/png"
-            )
+            content_type = attachment.content_type or "image/png"
+            if len(file_bytes) > COMPRESS_THRESHOLD_BYTES:
+                compressed, content_type = await asyncio.to_thread(
+                    _compress_image, file_bytes, content_type
+                )
+                if compressed is not None:
+                    log.info(
+                        "Compressed %d B -> %d B", len(file_bytes), len(compressed)
+                    )
+                    file_bytes = compressed
+            return await self.storage.upload(file_bytes, discord_id, content_type)
         except Exception:
             log.exception("Failed to process attachment")
             return None

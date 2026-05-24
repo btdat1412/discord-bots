@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from datetime import datetime
@@ -55,7 +56,11 @@ class ImageStorage:
     async def upload(
         self, file_bytes: bytes, discord_id: int, content_type: str = "image/png"
     ) -> str | None:
-        """Upload image bytes. Returns the S3 key (not a URL)."""
+        """Upload image bytes. Returns the S3 key (not a URL).
+
+        Runs the blocking boto3 call in a thread so the bot event loop
+        stays responsive during uploads.
+        """
         if not self.ready:
             return None
 
@@ -70,14 +75,18 @@ class ImageStorage:
         now = datetime.now(VN_TZ)
         key = f"gym-checkins/{discord_id}/{now.strftime('%Y-%m-%d_%H%M%S')}.{ext}"
 
-        try:
+        def _put():
             self._client.put_object(
                 Bucket=self._bucket,
                 Key=key,
                 Body=file_bytes,
                 ContentType=content_type,
+                CacheControl="public, max-age=31536000, immutable",
             )
-            log.info("Uploaded image: %s", key)
+
+        try:
+            await asyncio.to_thread(_put)
+            log.info("Uploaded image: %s (%d bytes)", key, len(file_bytes))
             return key
         except Exception:
             log.exception("Failed to upload image")
