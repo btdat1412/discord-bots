@@ -20,6 +20,13 @@ import time
 import aiohttp
 from PIL import Image
 
+try:
+    from pillow_heif import register_heif_opener
+
+    register_heif_opener()
+except ImportError:
+    pass
+
 MAX_IMAGE_DIMENSION = 2048
 COMPRESS_QUALITY = 85
 COMPRESS_THRESHOLD_BYTES = 500 * 1024  # only compress if file is over ~500 KB
@@ -302,7 +309,8 @@ class GymRatBot:
             content_type = attachment.content_type or "image/png"
             original_size = len(file_bytes)
             compressed_size = original_size
-            if original_size > COMPRESS_THRESHOLD_BYTES:
+            needs_convert = "heic" in content_type.lower() or "heif" in content_type.lower()
+            if original_size > COMPRESS_THRESHOLD_BYTES or needs_convert:
                 compressed, content_type = await asyncio.to_thread(
                     _compress_image, file_bytes, content_type
                 )
