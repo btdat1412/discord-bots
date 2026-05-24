@@ -15,6 +15,7 @@ from src.shared.storage import ImageStorage
 import asyncio
 import io
 import os
+import time
 
 import aiohttp
 from PIL import Image
@@ -278,18 +279,30 @@ class GymRatBot:
         if not self.storage or not self.storage.ready:
             return None
         try:
+            t0 = time.perf_counter()
             file_bytes = await attachment.read()
+            t1 = time.perf_counter()
+
             content_type = attachment.content_type or "image/png"
-            if len(file_bytes) > COMPRESS_THRESHOLD_BYTES:
+            original_size = len(file_bytes)
+            compressed_size = original_size
+            if original_size > COMPRESS_THRESHOLD_BYTES:
                 compressed, content_type = await asyncio.to_thread(
                     _compress_image, file_bytes, content_type
                 )
                 if compressed is not None:
-                    log.info(
-                        "Compressed %d B -> %d B", len(file_bytes), len(compressed)
-                    )
                     file_bytes = compressed
-            return await self.storage.upload(file_bytes, discord_id, content_type)
+                    compressed_size = len(compressed)
+            t2 = time.perf_counter()
+
+            key = await self.storage.upload(file_bytes, discord_id, content_type)
+            t3 = time.perf_counter()
+
+            log.info(
+                "upload timing: read=%.2fs compress=%.2fs put=%.2fs | %d B -> %d B",
+                t1 - t0, t2 - t1, t3 - t2, original_size, compressed_size,
+            )
+            return key
         except Exception:
             log.exception("Failed to process attachment")
             return None
@@ -305,23 +318,29 @@ class GymRatBot:
             return
 
         await interaction.response.defer(thinking=True)
+        t_start = time.perf_counter()
 
         image_key = None
         if attachment:
             image_key = await self._upload_attachment(attachment, interaction.user.id)
+        t_upload = time.perf_counter()
 
         user = await queries.get_or_create_user(
             self.db, interaction.user.id, interaction.user.display_name
         )
         today = _today()
         is_new = await queries.checkin(self.db, user["id"], today, image_key)
+        t_write = time.perf_counter()
 
-        total = await queries.get_total_checkins(self.db, user["id"])
-        current_streak, longest_streak = await queries.get_streak(
-            self.db, user["id"], today
+        total, (current_streak, longest_streak), month_count = await asyncio.gather(
+            queries.get_total_checkins(self.db, user["id"]),
+            queries.get_streak(self.db, user["id"], today),
+            queries.get_month_checkins(self.db, user["id"], today.year, today.month),
         )
-        month_count = await queries.get_month_checkins(
-            self.db, user["id"], today.year, today.month
+        t_read = time.perf_counter()
+        log.info(
+            "/checkin timing: upload=%.2fs write=%.2fs read=%.2fs",
+            t_upload - t_start, t_write - t_upload, t_read - t_write,
         )
 
         if is_new:
