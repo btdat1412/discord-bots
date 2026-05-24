@@ -37,6 +37,16 @@ def _today() -> date:
     return datetime.now(VN_TZ).date()
 
 
+def _ext_from_content_type(content_type: str) -> str:
+    if "jpeg" in content_type or "jpg" in content_type:
+        return "jpg"
+    if "gif" in content_type:
+        return "gif"
+    if "webp" in content_type:
+        return "webp"
+    return "png"
+
+
 def _compress_image(
     file_bytes: bytes, content_type: str
 ) -> tuple[bytes | None, str]:
@@ -274,10 +284,16 @@ class GymRatBot:
 
     async def _upload_attachment(
         self, attachment: discord.Attachment, discord_id: int
-    ) -> str | None:
-        """Download a Discord attachment, compress it, and upload to S3."""
+    ) -> tuple[str | None, bytes | None, str]:
+        """Download, compress, and upload an attachment.
+
+        Returns (key, bytes, content_type). The bytes are returned so the caller
+        can attach the image directly to the Discord response — Discord's image
+        proxy adds 3-5s to embed URLs because it fetches the remote URL before
+        rendering, but attachments are served from Discord's own CDN instantly.
+        """
         if not self.storage or not self.storage.ready:
-            return None
+            return None, None, "image/png"
         try:
             t0 = time.perf_counter()
             file_bytes = await attachment.read()
@@ -302,10 +318,10 @@ class GymRatBot:
                 "upload timing: read=%.2fs compress=%.2fs put=%.2fs | %d B -> %d B",
                 t1 - t0, t2 - t1, t3 - t2, original_size, compressed_size,
             )
-            return key
+            return key, file_bytes, content_type
         except Exception:
             log.exception("Failed to process attachment")
-            return None
+            return None, None, "image/png"
 
     async def _do_checkin(
         self, interaction: discord.Interaction, attachment: discord.Attachment = None
@@ -320,9 +336,13 @@ class GymRatBot:
         await interaction.response.defer(thinking=True)
         t_start = time.perf_counter()
 
-        image_key = None
+        image_key: str | None = None
+        image_bytes: bytes | None = None
+        image_ct = "image/png"
         if attachment:
-            image_key = await self._upload_attachment(attachment, interaction.user.id)
+            image_key, image_bytes, image_ct = await self._upload_attachment(
+                attachment, interaction.user.id
+            )
         t_upload = time.perf_counter()
 
         user = await queries.get_or_create_user(
@@ -359,10 +379,15 @@ class GymRatBot:
                 color=discord.Color.yellow(),
             )
 
-        if image_key and self.storage:
-            presigned = self.storage.get_url(image_key)
-            if presigned:
-                embed.set_image(url=presigned)
+        files: list[discord.File] = []
+        if image_bytes:
+            filename = f"gym.{_ext_from_content_type(image_ct)}"
+            files.append(discord.File(io.BytesIO(image_bytes), filename=filename))
+            embed.set_image(url=f"attachment://{filename}")
+        elif image_key and self.storage:
+            url = self.storage.get_url(image_key)
+            if url:
+                embed.set_image(url=url)
 
         embed.add_field(name="Total Days", value=str(total), inline=True)
         embed.add_field(name="Current Streak", value=f"{current_streak} days", inline=True)
@@ -370,7 +395,7 @@ class GymRatBot:
         embed.add_field(name="Longest Streak", value=f"{longest_streak} days", inline=True)
         embed.set_footer(text=f"{today.strftime('%A, %B %d, %Y')}")
 
-        await interaction.followup.send(embed=embed)
+        await interaction.followup.send(embed=embed, files=files)
 
     async def _do_checkin_prefix(self, ctx: commands.Context) -> None:
         if not self.db.ready:
@@ -378,9 +403,13 @@ class GymRatBot:
             return
 
         # Check for image attachments in the message
-        image_key = None
+        image_key: str | None = None
+        image_bytes: bytes | None = None
+        image_ct = "image/png"
         if ctx.message.attachments:
-            image_key = await self._upload_attachment(ctx.message.attachments[0], ctx.author.id)
+            image_key, image_bytes, image_ct = await self._upload_attachment(
+                ctx.message.attachments[0], ctx.author.id
+            )
 
         user = await queries.get_or_create_user(
             self.db, ctx.author.id, ctx.author.display_name
@@ -412,10 +441,15 @@ class GymRatBot:
                 color=discord.Color.yellow(),
             )
 
-        if image_key and self.storage:
-            presigned = self.storage.get_url(image_key)
-            if presigned:
-                embed.set_image(url=presigned)
+        files: list[discord.File] = []
+        if image_bytes:
+            filename = f"gym.{_ext_from_content_type(image_ct)}"
+            files.append(discord.File(io.BytesIO(image_bytes), filename=filename))
+            embed.set_image(url=f"attachment://{filename}")
+        elif image_key and self.storage:
+            url = self.storage.get_url(image_key)
+            if url:
+                embed.set_image(url=url)
 
         embed.add_field(name="Total Days", value=str(total), inline=True)
         embed.add_field(name="Current Streak", value=f"{current_streak} days", inline=True)
@@ -423,7 +457,7 @@ class GymRatBot:
         embed.add_field(name="Longest Streak", value=f"{longest_streak} days", inline=True)
         embed.set_footer(text=f"{today.strftime('%A, %B %d, %Y')}")
 
-        await ctx.send(embed=embed)
+        await ctx.send(embed=embed, files=files)
 
     async def _build_history(
         self, target: discord.User | discord.Member, year: int, month: int
