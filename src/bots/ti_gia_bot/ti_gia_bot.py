@@ -297,11 +297,10 @@ class TiGiaBot:
 
     # ---------------- Formatting ----------------
     def _format_gas_text(self, gas_list: list) -> str:
-        # Show RON 95, E5 RON 92, and Diesel
+        # Show E10 RON 95 (V & III) and Diesel
         targets = {
-            "Xăng RON 95-V": "RON 95",
-            "Xăng RON 95-III": "RON 95-III",
-            "Xăng E5 RON 92-II": "E5 RON 92",
+            "Xăng E10 RON 95-V": "E10 RON 95",
+            "Xăng E10 RON 95-III": "E10 RON 95-III",
             "DO 0,05S-II": "Dầu Diesel",
         }
         lines = []
