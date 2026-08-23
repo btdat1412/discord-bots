@@ -12,6 +12,23 @@ log = logging.getLogger(__name__)
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
 
+async def _get_thread_member_ids(channel) -> set[int] | None:
+    """Return the Discord IDs of users currently in the thread.
+
+    Returns None when the channel is not a thread (or the member list cannot be
+    fetched), which means "no filtering possible".
+    Requires the privileged GUILD_MEMBERS intent.
+    """
+    if not isinstance(channel, discord.Thread):
+        return None
+    try:
+        members = await channel.fetch_members()
+    except Exception as e:
+        log.warning("📅 Cannot fetch thread members: %s", e)
+        return None
+    return {m.id for m in members}
+
+
 async def daily_gym_reminder(bot: commands.Bot, channel_id: int, **kwargs):
     try:
         channel = bot.get_channel(channel_id)
@@ -41,6 +58,19 @@ async def daily_gym_reminder(bot: commands.Bot, channel_id: int, **kwargs):
 
         slackers = await queries.get_slackers(gym_rat.db, today, min_skip_days=3)
         log.info("📅 Found %d slacker candidate(s) in DB", len(slackers))
+
+        # Only nag people who are still in the thread — members who left should
+        # not be counted at all.
+        member_ids = await _get_thread_member_ids(channel)
+        if member_ids is not None:
+            before = len(slackers)
+            slackers = [row for row in slackers if row["discord_id"] in member_ids]
+            log.info(
+                "📅 Thread has %d member(s); %d slacker(s) left the thread, %d remain",
+                len(member_ids),
+                before - len(slackers),
+                len(slackers),
+            )
 
         lines = []
         for slacker in slackers:
