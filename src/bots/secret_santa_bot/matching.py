@@ -1,32 +1,75 @@
 """Pairing algorithms. Pure functions — no Discord, no database."""
 
 import random
-from typing import Dict, List
+from typing import Dict, List, Optional, Sequence, Set
 
 from .models import MatchStrategy
+
+MATCH_ATTEMPTS = 500
 
 
 class MatchError(Exception):
     """Raised when the participant list cannot satisfy the strategy."""
 
 
+Blocked = Dict[str, Set[str]]
+
+def block_across(
+    sides: Sequence[Sequence[str]], blocked: Optional[Blocked] = None
+) -> Blocked:
+    result: Blocked = blocked if blocked is not None else {}
+    for index, side in enumerate(sides):
+        others = [
+            member
+            for other_index, other in enumerate(sides)
+            if other_index != index
+            for member in other
+        ]
+        if not others:
+            continue
+        for giver in side:
+            result.setdefault(giver, set()).update(others)
+    return result
+
+
+def _violates(assignments: Dict[str, str], blocked: Blocked) -> bool:
+    return any(
+        receiver in blocked.get(giver, ()) for giver, receiver in assignments.items()
+    )
+
+
 def build_assignments(
-    user_ids: List[str], strategy: MatchStrategy
+    user_ids: Sequence[str],
+    strategy: MatchStrategy,
+    blocked: Optional[Blocked] = None,
 ) -> Dict[str, str]:
     """Return ``{giver_id: receiver_id}`` for every participant.
 
-    Raises :class:`MatchError` when the list is unusable for the strategy.
+    ``blocked`` names pairs that must never be matched — see
+    :func:`block_across`. Raises :class:`MatchError` when the list is unusable,
+    or when no arrangement respects the exclusions.
     """
+    user_ids = list(user_ids)
     if len(user_ids) < 2:
-        raise MatchError("At least 2 participants are needed.")
+        raise MatchError("Cần ít nhất 2 người.")
     if len(set(user_ids)) != len(user_ids):
-        raise MatchError("Duplicate participants in the list.")
+        raise MatchError("Danh sách có người bị trùng.")
+    if strategy is not MatchStrategy.CIRCLE:
+        raise MatchError(f"Không biết kiểu ghép: {strategy}")
 
-    if strategy is MatchStrategy.CIRCLE:
-        return _circle(user_ids)
-    if strategy is MatchStrategy.PAIRS:
-        return _pairs(user_ids)
-    raise MatchError(f"Unknown match strategy: {strategy}")
+    blocked = blocked or {}
+    for _ in range(MATCH_ATTEMPTS):
+        assignments = _circle(user_ids)
+        if not _violates(assignments, blocked):
+            return assignments
+
+    # Deliberately says nothing about how the draw is made — the message
+    # reaches the channel, and players have no business learning that the bot
+    # reshuffles, let alone how often.
+    raise MatchError(
+        "Không xếp được vòng nào hợp lệ với danh sách hiện tại. "
+        "Rủ thêm người rồi thử lại."
+    )
 
 
 def _circle(user_ids: List[str]) -> Dict[str, str]:
@@ -41,22 +84,6 @@ def _circle(user_ids: List[str]) -> Dict[str, str]:
         giver: shuffled[(i + 1) % len(shuffled)]
         for i, giver in enumerate(shuffled)
     }
-
-
-def _pairs(user_ids: List[str]) -> Dict[str, str]:
-    """Shuffle into mutual pairs: A gives to B and B gives to A."""
-    if len(user_ids) % 2:
-        raise MatchError(
-            f"This edition swaps in pairs, so the number of participants must "
-            f"be even. There are {len(user_ids)}."
-        )
-    shuffled = list(user_ids)
-    random.shuffle(shuffled)
-    assignments: Dict[str, str] = {}
-    for a, b in zip(shuffled[0::2], shuffled[1::2]):
-        assignments[a] = b
-        assignments[b] = a
-    return assignments
 
 
 def santa_of(assignments: Dict[str, str]) -> Dict[str, str]:

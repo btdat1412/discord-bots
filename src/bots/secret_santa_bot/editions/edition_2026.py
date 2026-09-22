@@ -15,6 +15,13 @@ from ..models import (
 
 SHIRT_SIZES = ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL", "5XL"]
 
+EXCLUSIONS = [
+    {
+        "538400178949062676", 
+        "764017791945801728",  
+    },
+]
+
 EDITION = Edition(
     key="2026",
     year=2026,
@@ -93,6 +100,7 @@ EDITION = Edition(
     opt_in_prompt="Bạn có muốn công khai wishlist của mình không?",
     match_strategy=MatchStrategy.CIRCLE,
     min_participants=2,
+    exclusions=EXCLUSIONS,
     lobby_color=0x9B59B6,
     assignment_color=0x9B59B6,
     footer="ĐỔI QUÀ GAMING 2026",

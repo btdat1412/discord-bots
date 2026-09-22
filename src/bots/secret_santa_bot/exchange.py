@@ -29,7 +29,7 @@ import discord
 from src.shared.database import Database
 
 from . import queries, ui
-from .matching import MatchError, build_assignments, santa_of
+from .matching import Blocked, MatchError, block_across, build_assignments, santa_of
 from .models import Edition
 
 log = logging.getLogger(__name__)
@@ -85,6 +85,25 @@ async def _delete_quietly(message: discord.Message) -> bool:
     except discord.HTTPException as exc:
         log.warning("Could not delete DM %s: %s", message.id, exc)
         return False
+
+
+def exclusions_for(
+    edition: Edition, participants: List[asyncpg.Record]
+) -> Blocked:
+    blocked: Blocked = {}
+    for group in edition.exclusions:
+        sides = []
+        for root in group:
+            side = [
+                row["user_id"]
+                for row in participants
+                if row["user_id"] == root or row["registered_by"] == root
+            ]
+            if side:
+                sides.append(side)
+        if len(sides) > 1:
+            block_across(sides, blocked)
+    return blocked
 
 
 def recipient_of(row: asyncpg.Record) -> str:
@@ -159,7 +178,9 @@ async def run_exchange(
 
     try:
         assignments = build_assignments(
-            [row["user_id"] for row in participants], edition.match_strategy
+            [row["user_id"] for row in participants],
+            edition.match_strategy,
+            exclusions_for(edition, participants),
         )
     except MatchError as exc:
         for message in probes:

@@ -9,9 +9,9 @@ Nothing here touches Discord or the database — see ``views.py`` for the form
 rendering and ``queries.py`` for persistence.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional, Union
+from typing import List, Optional, Set, Union
 
 # Discord hard limits.
 MAX_FORM_FIELDS = 5  # components per modal
@@ -57,16 +57,12 @@ class Visibility(str, Enum):
 
 
 class MatchStrategy(str, Enum):
-    """How participants are paired up when the host starts the exchange."""
+    """How participants are matched when the host starts the exchange."""
 
     CIRCLE = "circle"
     """One big random cycle: everyone gives once and receives once, and nobody
-    gets themselves. Two people can never end up giving to each other unless
-    there are exactly two participants."""
-
-    PAIRS = "pairs"
-    """Mutual pairs: A gives to B and B gives to A. Requires an even number of
-    participants — good for a swap, e.g. trading T-shirts."""
+    gets themselves. Works for any number of participants — two people can only
+    end up giving to each other when there are exactly two of them."""
 
 
 @dataclass(frozen=True)
@@ -320,6 +316,8 @@ class Edition:
     match_strategy: MatchStrategy = MatchStrategy.CIRCLE
     min_participants: int = 2
 
+    exclusions: List[Set[str]] = field(default_factory=list)
+
     thumbnail_url: Optional[str] = None
     lobby_color: int = 0xE91E63
     assignment_color: int = 0xE91E63
@@ -360,11 +358,6 @@ class Edition:
                         f"{len(entry.options)} options, Discord allows "
                         f"{MAX_SELECT_OPTIONS}"
                     )
-        if self.match_strategy is MatchStrategy.PAIRS and self.min_participants % 2:
-            raise ValueError(
-                f"edition {self.key}: PAIRS matching needs an even "
-                f"min_participants, got {self.min_participants}"
-            )
 
     # ---------- Field lookups used by the embed builders ----------
 
