@@ -382,7 +382,10 @@ class ProxyPanelView(discord.ui.View):
         for row in proxies[: self.MAX_REMOVE_BUTTONS]:
             remove = discord.ui.Button(
                 style=discord.ButtonStyle.danger,
-                label=f"❌ {row['display_name']}"[:80],
+                label=edition.copy.proxy_remove_button.format(
+                    name=row["display_name"]
+                )[:80],
+                emoji="🗑️",
                 custom_id=custom_id("proxydel", game_id, row["user_id"]),
             )
             remove.callback = self._make_remove(row["user_id"])

@@ -233,6 +233,7 @@ class Copy:
     )
     proxy_panel_empty: str = "Bạn chưa đăng ký dùm cho ai."
     proxy_add_button: str = "➕ Đăng ký thêm người"
+    proxy_remove_button: str = "Xoá {name}"
     proxy_registered_ok: str = (
         "✅ Đã đăng ký dùm cho **{name}**. Kết quả của họ bot sẽ DM cho bạn."
     )
