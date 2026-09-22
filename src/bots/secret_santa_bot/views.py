@@ -194,48 +194,80 @@ class CompletedView(discord.ui.View):
 # ------------------------------------------------------------- pagination ----
 
 
-class ParticipantsView(discord.ui.View):
-    """Prev/Next on the ephemeral participants list."""
+class PaginationButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"santa:page:(?P<game>\d+):(?P<page>-?\d+)",
+):
+    """One Prev/Next button on the participants list.
+
+    A :class:`discord.ui.DynamicItem` rather than a plain button, because the
+    list is ephemeral: after the bot restarts — or after an ordinary View times
+    out — there is no View left in memory and the buttons go dead, with Discord
+    showing "didn't respond in time". Matching on the custom_id instead means
+    the destination page is the only state needed, so the buttons keep working
+    for as long as the message exists.
+
+    ``add_view`` registers dynamic children by pattern and does *not* add them
+    to the per-message dispatch table, so there is no double dispatch when the
+    View does happen to still be in memory.
+    """
 
     def __init__(
-        self,
-        santa: "SecretSantaBot",
-        game_id: int,
-        edition: Edition,
-        page: int,
-        total_pages: int,
+        self, game_id: int, page: int, *, label: str, disabled: bool = False
     ):
-        super().__init__(timeout=300)
-        self.santa = santa
         self.game_id = game_id
         self.page = page
-
-        previous = discord.ui.Button(
-            style=discord.ButtonStyle.secondary,
-            label=edition.copy.prev_page,
-            disabled=page <= 1,
-            custom_id=custom_id("page", game_id, page - 1),
-        )
-        previous.callback = self._go_previous
-        self.add_item(previous)
-
-        nxt = discord.ui.Button(
-            style=discord.ButtonStyle.secondary,
-            label=edition.copy.next_page,
-            disabled=page >= total_pages,
-            custom_id=custom_id("page", game_id, page + 1),
-        )
-        nxt.callback = self._go_next
-        self.add_item(nxt)
-
-    async def _go_previous(self, interaction: discord.Interaction) -> None:
-        await self.santa.handle_view_participants(
-            interaction, self.game_id, page=self.page - 1, edit=True
+        super().__init__(
+            discord.ui.Button(
+                style=discord.ButtonStyle.secondary,
+                label=label,
+                disabled=disabled,
+                custom_id=custom_id("page", game_id, page),
+            )
         )
 
-    async def _go_next(self, interaction: discord.Interaction) -> None:
-        await self.santa.handle_view_participants(
-            interaction, self.game_id, page=self.page + 1, edit=True
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match, /):
+        return cls(
+            int(match["game"]), int(match["page"]), label=item.label or "..."
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        santa = getattr(interaction.client, "secret_santa_bot", None)
+        if santa is None:
+            log.warning("Pagination clicked but the bot has no secret_santa_bot")
+            return
+        await santa.handle_view_participants(
+            interaction, self.game_id, page=self.page, edit=True
+        )
+
+
+class ParticipantsView(discord.ui.View):
+    """Prev/Next on the ephemeral participants list.
+
+    Holds nothing but :class:`PaginationButton`, so it carries no state that
+    can be lost.
+    """
+
+    def __init__(
+        self, edition: Edition, game_id: int, page: int, total_pages: int
+    ):
+        super().__init__(timeout=None)
+        self.add_item(
+            PaginationButton(
+                game_id,
+                page - 1,
+                label=edition.copy.prev_page,
+                disabled=page <= 1,
+            )
+        )
+        self.add_item(
+            PaginationButton(
+                game_id,
+                page + 1,
+                label=edition.copy.next_page,
+                disabled=page >= total_pages,
+            )
         )
 
 

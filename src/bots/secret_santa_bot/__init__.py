@@ -4,6 +4,7 @@ from pathlib import Path
 
 from src.shared.database import Database
 
+from . import views
 from .bot import SecretSantaBot
 
 log = logging.getLogger(__name__)
@@ -15,6 +16,11 @@ def setup(bot):
     db = Database(migrations_dir=MIGRATIONS_DIR)
     santa = SecretSantaBot(bot, db)
     bot.secret_santa_bot = santa
+
+    # Pagination on the participants list is matched by custom_id, so those
+    # buttons keep working after a restart instead of dying with Discord's
+    # "didn't respond in time".
+    bot.add_dynamic_items(views.PaginationButton)
 
     @bot.event_listener("on_message")
     async def _dm_lookup(message):

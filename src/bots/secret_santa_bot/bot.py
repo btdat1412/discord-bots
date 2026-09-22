@@ -548,6 +548,13 @@ class SecretSantaBot:
         page: int,
         edit: bool = False,
     ) -> None:
+        # Acknowledge first: Discord only allows 3 seconds, and two database
+        # round trips follow. Deferring turns that into 15 minutes.
+        if edit:
+            await interaction.response.defer()
+        else:
+            await interaction.response.defer(ephemeral=True, thinking=True)
+
         context = await self._load(interaction, game_id)
         if context is None:
             return
@@ -558,16 +565,18 @@ class SecretSantaBot:
             edition, participants, page
         )
         view = (
-            views.ParticipantsView(self, game_id, edition, page, total_pages)
+            views.ParticipantsView(edition, game_id, page, total_pages)
             if total_pages > 1
             else None
         )
 
         if edit:
-            await interaction.response.edit_message(embed=embed, view=view)
+            await interaction.edit_original_response(
+                embed=embed, view=view or discord.ui.View()
+            )
         else:
-            await interaction.response.send_message(
-                embed=embed, view=view, ephemeral=True
+            await interaction.followup.send(
+                embed=embed, view=view or discord.utils.MISSING, ephemeral=True
             )
 
     async def handle_start_click(
@@ -647,10 +656,18 @@ class SecretSantaBot:
     #  Helpers                                                             #
     # ------------------------------------------------------------------ #
 
+    @staticmethod
+    async def _reply(interaction: discord.Interaction, content: str) -> None:
+        """Answer an interaction whether or not it has already been deferred."""
+        if interaction.response.is_done():
+            await interaction.followup.send(content, ephemeral=True)
+        else:
+            await interaction.response.send_message(content, ephemeral=True)
+
     async def _require_db(self, interaction: discord.Interaction) -> bool:
         if self.db.ready:
             return True
-        await interaction.response.send_message(DB_OFFLINE, ephemeral=True)
+        await self._reply(interaction, DB_OFFLINE)
         return False
 
     async def _load(
@@ -662,16 +679,16 @@ class SecretSantaBot:
 
         game = await queries.get_game(self.db, game_id)
         if game is None:
-            await interaction.response.send_message(GAME_GONE, ephemeral=True)
+            await self._reply(interaction, GAME_GONE)
             return None
 
         edition = get_edition(game["edition_key"])
         if edition is None:
-            await interaction.response.send_message(
+            await self._reply(
+                interaction,
                 EDITION_UNINSTALLED.format(
                     game_id=game["id"], key=game["edition_key"]
                 ),
-                ephemeral=True,
             )
             return None
 

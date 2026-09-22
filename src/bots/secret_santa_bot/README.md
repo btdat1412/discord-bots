@@ -103,6 +103,22 @@ A bump deletes the previous pushed-down copy first, so a channel gains at most
 one lobby message per game no matter how often it runs. The original message
 from `/secret-santa` is never deleted.
 
+### Pagination that survives a restart
+
+The participants list is ephemeral, and its Prev/Next buttons used to live in
+an in-memory `View`. That View died on its timeout or whenever the bot
+restarted, and the buttons then produced Discord's *"didn't respond in time"* —
+no handler was listening any more.
+
+They are now `discord.ui.DynamicItem`s matched on `santa:page:<game>:<page>`,
+registered once with `bot.add_dynamic_items()`. The destination page is the
+only state, so it is read back off the button itself. `ViewStore.add_view`
+registers dynamic children by pattern and skips the per-message dispatch
+table, so a View that *is* still in memory does not cause a second dispatch.
+
+Both participant handlers also `defer()` before touching the database: Discord
+allows three seconds to acknowledge, and two round trips follow.
+
 ### Register dùm — playing without a Discord account
 
 Press **Đăng ký dùm** and fill in their name plus the normal form. They become
