@@ -46,10 +46,26 @@ def get_gym_rat_jobs() -> List[JobConfig]:
     return jobs
 
 
+def get_secret_santa_jobs() -> List[JobConfig]:
+    """Needs no channel id — each open game records its own channel."""
+    from src.shared.cron_job.secret_santa_jobs import create_daily_bump_job
+
+    hour_str = os.getenv("SECRET_SANTA_BUMP_HOUR", "8").strip()
+    try:
+        hour = int(hour_str)
+    except ValueError:
+        log.error("🔧 Invalid SECRET_SANTA_BUMP_HOUR: %s — using 8", hour_str)
+        hour = 8
+
+    log.info("🔧 Configured daily Secret Santa lobby bump at %02d:00", hour)
+    return [create_daily_bump_job(hour)]
+
+
 # Bot name to job configuration function mapping
 BOT_CRON_MAPPINGS = {
     "ti-gia": get_ti_gia_jobs,
     "gym-rat": get_gym_rat_jobs,
+    "secret-santa": get_secret_santa_jobs,
 }
 
 

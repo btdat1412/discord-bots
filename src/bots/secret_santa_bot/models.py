@@ -203,19 +203,17 @@ class Copy:
         "ngay sau đây."
     )
     unreachable_title: str = (
-        "❌ **Chưa bắt đầu được — vài người không nhận được DM:**"
+        "❌ **Chưa bắt đầu được — bot không nhắn được cho:**"
     )
     unreachable_help: str = (
         "Nhờ họ bật **User Settings → Content & Social → Allow direct "
         "messages from server members** (hoặc bỏ chặn bot), rồi bấm bắt đầu "
-        "lại.\n**Chưa ai được chia và chưa lưu gì hết.**"
+        "lại.\n**Mọi DM đã gửi đều bị xoá lại, chưa ai được chia và chưa lưu "
+        "gì hết.**\nNếu còn người khác cũng tắt DM thì lần sau bot báo tiếp."
     )
-    delivery_failed_title: str = "❌ **Gửi DM lỗi sau khi đã bốc thăm:**"
-    rolled_back_note: str = (
-        "Mọi DM đã gửi đều được xoá lại và lobby mở lại như cũ."
-    )
-    rollback_broken_note: str = (
-        "⚠️ Rollback chưa sạch — check log trước khi bắt đầu lại."
+    cleanup_failed_note: str = (
+        "⚠️ Có DM xoá không được — vài người có thể đã kịp thấy phần cũ. "
+        "Coi log trước khi bắt đầu lại."
     )
     generic_failure: str = "❌ **Chưa bắt đầu được.** {reason}"
 
@@ -256,6 +254,9 @@ class Copy:
         "Mình chưa thấy bạn có phần nào ở ván nào đã xong cả.\n"
         "Nếu ván chưa bắt đầu thì chờ chủ xị bấm bắt đầu nha."
     )
+
+    # Pushing the lobby back to the bottom of a busy channel
+    bumped_ok: str = "✅ Đã đẩy lobby xuống cuối channel: {link}"
 
     # Pagination and generic errors
     prev_page: str = "◀️ Trước"

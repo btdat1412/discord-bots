@@ -8,7 +8,7 @@ shared pool, so it is encoded with ``json.dumps`` on write (with an explicit
 import json
 import logging
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import asyncpg
 
@@ -66,9 +66,25 @@ async def get_game(db: Database, game_id: int) -> Optional[asyncpg.Record]:
 
 
 async def get_open_games(db: Database) -> List[asyncpg.Record]:
-    """Every lobby still accepting joins — used to re-arm buttons on startup."""
+    """Every lobby still accepting joins."""
     return await db.fetch(
         "SELECT * FROM santa_games WHERE state = $1 ORDER BY id", STATE_OPEN
+    )
+
+
+async def get_open_game_in_guild(
+    db: Database, guild_id: str
+) -> Optional[asyncpg.Record]:
+    """The newest lobby still open in this server, if there is one."""
+    return await db.fetchrow(
+        """
+        SELECT * FROM santa_games
+        WHERE guild_id = $1 AND state = $2
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+        """,
+        guild_id,
+        STATE_OPEN,
     )
 
 
@@ -90,9 +106,77 @@ async def get_guild_games(
     )
 
 
-async def cancel_game(db: Database, game_id: int) -> None:
+# ------------------------------------------------------- lobby messages ----
+
+
+async def add_lobby_message(
+    db: Database,
+    game_id: int,
+    channel_id: str,
+    message_id: str,
+    is_primary: bool = False,
+) -> None:
+    """Remember one more message that shows this game's buttons."""
     await db.execute(
-        "UPDATE santa_games SET state = $1 WHERE id = $2", STATE_CANCELLED, game_id
+        """
+        INSERT INTO santa_lobby_messages
+            (game_id, channel_id, message_id, is_primary)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT DO NOTHING
+        """,
+        game_id,
+        channel_id,
+        message_id,
+        is_primary,
+    )
+
+
+async def get_lobby_messages(db: Database, game_id: int) -> List[asyncpg.Record]:
+    return await db.fetch(
+        """
+        SELECT * FROM santa_lobby_messages
+        WHERE game_id = $1
+        ORDER BY is_primary DESC, id ASC
+        """,
+        game_id,
+    )
+
+
+async def get_open_lobby_messages(db: Database) -> List[asyncpg.Record]:
+    """Every message of every open game — used to re-arm buttons on startup."""
+    return await db.fetch(
+        """
+        SELECT m.*, g.edition_key
+        FROM santa_lobby_messages m
+        JOIN santa_games g ON g.id = m.game_id
+        WHERE g.state = $1
+        ORDER BY m.game_id, m.id
+        """,
+        STATE_OPEN,
+    )
+
+
+async def forget_lobby_message(db: Database, game_id: int, message_id: str) -> None:
+    """Drop a message that no longer exists in Discord."""
+    await db.execute(
+        """
+        DELETE FROM santa_lobby_messages
+        WHERE game_id = $1 AND message_id = $2
+        """,
+        game_id,
+        message_id,
+    )
+
+
+async def get_bump_messages(db: Database, game_id: int) -> List[asyncpg.Record]:
+    """The pushed-down copies, i.e. everything except the original."""
+    return await db.fetch(
+        """
+        SELECT * FROM santa_lobby_messages
+        WHERE game_id = $1 AND is_primary = FALSE
+        ORDER BY id
+        """,
+        game_id,
     )
 
 
@@ -278,12 +362,19 @@ def participant_answers(row: asyncpg.Record) -> Dict[str, Any]:
 
 
 async def commit_start(
-    db: Database, game_id: int, assignments: Dict[str, str]
+    db: Database,
+    game_id: int,
+    assignments: Dict[str, str],
+    deliveries: List[Tuple[str, str, str, str]],
 ) -> None:
-    """Write every assignment and flip the game to COMPLETED, atomically.
+    """Write every assignment, the delivery log and the new state, atomically.
 
     Either all rows land or none do — a partially matched game is never
-    visible to another query.
+    visible to another query. This runs only once every DM has already been
+    delivered, so a game marked COMPLETED always has everyone notified.
+
+    ``deliveries`` holds ``(user_id, recipient_id, channel_id, message_id)``
+    per DM sent.
     """
     async with db.transaction() as conn:
         for giver_id, receiver_id in assignments.items():
@@ -303,7 +394,7 @@ async def commit_start(
                     f"while starting"
                 )
 
-        await conn.execute(
+        result = await conn.execute(
             """
             UPDATE santa_games
             SET state = $2, started_at = NOW(), completed_at = NOW()
@@ -313,57 +404,31 @@ async def commit_start(
             STATE_COMPLETED,
             STATE_OPEN,
         )
+        if result == "UPDATE 0":
+            # Someone closed the game while the DMs were going out. Raising
+            # rolls the whole transaction back, so the assignments written
+            # above are discarded rather than left on a non-open game.
+            raise RuntimeError(
+                f"game {game_id} was no longer open when the draw committed"
+            )
 
-
-async def rollback_start(db: Database, game_id: int) -> None:
-    """Undo :func:`commit_start` — clear assignments and reopen the lobby."""
-    async with db.transaction() as conn:
-        await conn.execute(
-            "UPDATE santa_participants SET assigned_to = NULL WHERE game_id = $1",
-            game_id,
-        )
-        await conn.execute(
-            """
-            UPDATE santa_games
-            SET state = $2, started_at = NULL, completed_at = NULL
-            WHERE id = $1
-            """,
-            game_id,
-            STATE_OPEN,
-        )
-        await conn.execute(
-            "DELETE FROM santa_deliveries WHERE game_id = $1", game_id
-        )
+        for user_id, recipient_id, channel_id, message_id in deliveries:
+            await conn.execute(
+                """
+                INSERT INTO santa_deliveries
+                    (game_id, user_id, recipient_id, dm_channel_id,
+                     dm_message_id)
+                VALUES ($1, $2, $3, $4, $5)
+                """,
+                game_id,
+                user_id,
+                recipient_id,
+                channel_id,
+                message_id,
+            )
 
 
 # ------------------------------------------------------------ delivery ----
-
-
-async def log_delivery(
-    db: Database,
-    game_id: int,
-    user_id: str,
-    recipient_id: str,
-    dm_channel_id: str,
-    dm_message_id: str,
-) -> None:
-    """Record one delivered DM.
-
-    ``user_id`` is whose assignment it is; ``recipient_id`` is the Discord
-    account the message actually went to. They differ for a proxy.
-    """
-    await db.execute(
-        """
-        INSERT INTO santa_deliveries
-            (game_id, user_id, recipient_id, dm_channel_id, dm_message_id)
-        VALUES ($1, $2, $3, $4, $5)
-        """,
-        game_id,
-        user_id,
-        recipient_id,
-        dm_channel_id,
-        dm_message_id,
-    )
 
 
 async def get_deliveries(db: Database, game_id: int) -> List[asyncpg.Record]:

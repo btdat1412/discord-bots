@@ -72,6 +72,7 @@ Slash commands are synced per guild on startup, so they appear within seconds.
 | `/secret-santa [edition]` | anyone | Opens a lobby. Without `edition` it uses the current year's rules. |
 | `/santa-history` | anyone | Past games in this server: edition, host, participant count, state. |
 | `/santa-my-assignment` | anyone | Re-shows your assignment from the latest finished game, in case the DM is lost. The reply is ephemeral, so nobody else sees the command or the answer. |
+| `/my-current-game` | anyone | Reposts the open lobby at the bottom of the channel, so nobody has to scroll for it. |
 
 **Or just DM the bot.** Any direct message to it — literally any text — gets
 your assignment back. Slash commands are synced per guild and therefore do not
@@ -84,6 +85,23 @@ join again to redo your answers), **View Participants** lists who is in,
 **Đăng ký dùm** enters someone who is not in the server, and **Start** —
 visible only once enough people have joined, and only working for the host —
 draws and DMs everyone.
+
+### Keeping the lobby findable
+
+A lobby posted on Monday is unreachable by Wednesday in a chatty channel.
+`/my-current-game` posts a fresh copy at the bottom, and a daily job does the
+same every morning (08:00 Vietnam time, `SECRET_SANTA_BUMP_HOUR` to change it,
+registered under `secret-santa` in `BOT_CRON_MAPPINGS`).
+
+A game can therefore be on screen several times at once, so **every copy is
+live**: `santa_lobby_messages` lists them, `_refresh_lobby` edits all of them
+on every join or leave, and each gets its own `View` instance because
+discord.py binds a persistent view to a single message id. Copies that were
+deleted in Discord are dropped from the table on the next refresh.
+
+A bump deletes the previous pushed-down copy first, so a channel gains at most
+one lobby message per game no matter how often it runs. The original message
+from `/secret-santa` is never deleted.
 
 ### Register dùm — playing without a Discord account
 
@@ -208,30 +226,37 @@ unknown one.
 Discord has no transactions, so `exchange.py` builds the closest honest
 equivalent:
 
-1. **Preflight** — the bot really sends a short DM to every participant.
+1. **Preflight** — a short probe DM goes to everyone who has to be messaged.
    Opening a DM channel succeeds even for people who block DMs (this is exactly
-   what the old Go bot got wrong), so only an actual send proves reachability.
-   If anyone fails, the run stops: nothing is drawn, nothing is saved, and the
-   probes already sent are deleted again.
-2. **Commit** — assignments and the new game state are written in a single
-   database transaction.
-3. **Deliver** — assignment DMs go out, each one logged to `santa_deliveries`
-   with both whose assignment it is and which account received it.
-4. **Compensate** — if a delivery still fails, the bot deletes every assignment
-   DM it already sent, clears the assignments and reopens the lobby.
+   what the old Go bot got wrong), so an actual send is the only proof of
+   reachability. If anyone fails, the probes are deleted and the run stops
+   before a single assignment exists — nobody sees anything.
+2. **Deliver** — assignment DMs go out, each message remembered.
+3. **Undo on failure** — if someone passed the probe and then refused the
+   assignment anyway, every DM already sent is deleted. The database has not
+   been touched at all, so there is nothing else to unwind.
+4. **Commit** — only once every DM has landed: assignments, the delivery log
+   and the new game state in a single transaction.
 
-The host and the channel always get a message naming exactly who was
-unreachable and confirming that nobody received anything.
+Because the draw is saved last, a game marked `COMPLETED` always means everyone
+was notified. The failure path reports who could not be reached and confirms
+nothing was saved; if a sent DM could not be deleted again, it says so too,
+since somebody may have glimpsed an assignment that no longer counts.
+
+The probe costs one extra DM per person per start attempt. That is the price of
+the guarantee: without it, whoever is early in the delivery order would receive
+an assignment that a later failure has to take back.
 
 ## 6. Schema
 
-Three tables, created by `migrations/001_secret_santa_init.sql`:
+Four tables, created by the files in `migrations/`:
 
 - `santa_games` — one row per lobby, carrying `edition_key`.
 - `santa_participants` — one row per player per game. Answers live in a JSONB
   column keyed by field key, so **a new year never needs a migration**.
   `registered_by` is set for people entered through "register dùm".
-- `santa_deliveries` — the DM log that makes the rollback possible.
+- `santa_deliveries` — the DM log, written with the commit.
+- `santa_lobby_messages` — every message currently showing a game's buttons.
 
 ## 7. Files
 

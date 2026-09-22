@@ -8,8 +8,17 @@ import discord
 from .models import Edition, FormField
 from .queries import participant_answers
 
-PAGE_SIZE = 5
+# Discord embed limits.
 EMBED_FIELD_LIMIT = 1024
+EMBED_DESCRIPTION_LIMIT = 4096
+
+# The participants list is paginated by character budget, not by a fixed
+# number of people: five participants who each filled in 500-character answers
+# overflow the description limit and Discord rejects the whole interaction.
+PAGE_BUDGET = 3800
+MAX_PER_PAGE = 10
+ANSWER_PREVIEW = 150
+"""Answers are trimmed in the list — the full text is in the assignment DM."""
 
 
 def display_name(row: asyncpg.Record) -> str:
@@ -102,51 +111,83 @@ def build_completed_embed(
 # ---------------------------------------------------------- participants ----
 
 
+def _preview(value: str) -> str:
+    value = " ".join(value.split())
+    if len(value) <= ANSWER_PREVIEW:
+        return value
+    return value[: ANSWER_PREVIEW - 1].rstrip() + "…"
+
+
+def _participant_line(
+    edition: Edition, row: asyncpg.Record, index: int
+) -> str:
+    answers = participant_answers(row)
+    copy = edition.copy
+    line = f"**{index}.** {display_name(row)}"
+    if row["avatar_url"]:
+        line += f" [🖼️]({row['avatar_url']})"
+    if row["registered_by"]:
+        marker = copy.proxy_list_marker.format(mention=f"<@{row['registered_by']}>")
+        line += f" · *{marker}*"
+
+    visible = list(edition.always_public_fields)
+    if row["public_opt_in"]:
+        visible += edition.opt_in_fields
+    for field in visible:
+        value = (answers.get(field.key) or "").strip()
+        if value:
+            line += f"\n     {field.heading()}: {_preview(value)}"
+    return line
+
+
+def paginate_participants(
+    edition: Edition, participants: List[asyncpg.Record]
+) -> List[List[str]]:
+    """Split the rendered lines into pages that each fit in one embed.
+
+    A page closes when adding the next participant would pass
+    :data:`PAGE_BUDGET`, so no page can ever exceed Discord's description
+    limit however much people wrote. Always returns at least one page.
+    """
+    pages: List[List[str]] = [[]]
+    used = 0
+    for index, row in enumerate(participants, 1):
+        line = _participant_line(edition, row, index)
+        # Hard cap one line on its own, so a single huge entry cannot
+        # overflow a page by itself.
+        line = line[:PAGE_BUDGET]
+        cost = len(line) + 2  # the "\n\n" joining it to the previous line
+        if pages[-1] and (used + cost > PAGE_BUDGET or len(pages[-1]) >= MAX_PER_PAGE):
+            pages.append([])
+            used = 0
+        pages[-1].append(line)
+        used += cost
+    return pages
+
+
 def build_participants_embed(
     edition: Edition, participants: List[asyncpg.Record], page: int
-) -> Tuple[discord.Embed, int]:
-    """Returns the embed and the clamped page number."""
-    total = len(participants)
-    total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
-    page = max(1, min(page, total_pages))
-
+) -> Tuple[discord.Embed, int, int]:
+    """Returns the embed, the clamped page number and the total page count."""
     copy = edition.copy
     embed = discord.Embed(title=copy.participants_title, color=edition.lobby_color)
     _thumbnail(embed, edition)
 
-    if total == 0:
+    if not participants:
         embed.description = copy.participants_empty
-        return embed, page
+        return embed, 1, 1
 
-    start = (page - 1) * PAGE_SIZE
-    lines = []
-    for index, row in enumerate(participants[start : start + PAGE_SIZE], start + 1):
-        answers = participant_answers(row)
-        line = f"**{index}.** {display_name(row)}"
-        if row["avatar_url"]:
-            line += f" [🖼️]({row['avatar_url']})"
-        if row["registered_by"]:
-            marker = copy.proxy_list_marker.format(
-                mention=f"<@{row['registered_by']}>"
-            )
-            line += f" · *{marker}*"
+    pages = paginate_participants(edition, participants)
+    total_pages = len(pages)
+    page = max(1, min(page, total_pages))
 
-        visible = list(edition.always_public_fields)
-        if row["public_opt_in"]:
-            visible += edition.opt_in_fields
-        for field in visible:
-            value = (answers.get(field.key) or "").strip()
-            if value:
-                line += f"\n     {field.heading()}: {value}"
-        lines.append(line)
-
-    embed.description = "\n\n".join(lines)
+    embed.description = "\n\n".join(pages[page - 1])[:EMBED_DESCRIPTION_LIMIT]
     embed.set_footer(
         text=copy.participants_footer.format(
-            page=page, pages=total_pages, total=total
+            page=page, pages=total_pages, total=len(participants)
         )
     )
-    return embed, page
+    return embed, page, total_pages
 
 
 # ------------------------------------------------------------ assignment ----

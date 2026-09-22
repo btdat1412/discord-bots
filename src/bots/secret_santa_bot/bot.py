@@ -31,6 +31,10 @@ DM_LOOKUP_NONE = (
     "Nếu ván chưa bắt đầu thì chờ chủ xị bấm bắt đầu nha."
 )
 DM_COOLDOWN_SECONDS = 5.0
+NO_OPEN_GAME = (
+    "❌ Server này chưa có ván nào đang mở. Dùng `/secret-santa` để mở ván mới."
+)
+BUMP_FAILED = "❌ Không đẩy được lobby xuống. Coi log giùm."
 EDITION_UNINSTALLED = (
     "❌ Game #{game_id} chơi bằng edition `{key}`, edition này không còn "
     "trong bot nữa."
@@ -89,6 +93,13 @@ class SecretSantaBot:
         async def santa_my_assignment(interaction: discord.Interaction):
             await self._do_resend_assignment(interaction)
 
+        @self.bot.slash_command(
+            name="my-current-game",
+            description="Đẩy ván đang mở xuống cuối channel cho dễ kiếm",
+        )
+        async def my_current_game(interaction: discord.Interaction):
+            await self._do_bump_current_game(interaction)
+
     # ------------------------------------------------------------------ #
     #  Command bodies                                                      #
     # ------------------------------------------------------------------ #
@@ -133,6 +144,14 @@ class SecretSantaBot:
             )
             return
 
+        await queries.add_lobby_message(
+            self.db,
+            game["id"],
+            str(interaction.channel_id),
+            str(message.id),
+            is_primary=True,
+        )
+
         view = views.LobbyView(self, game["id"], edition, show_start=False)
         await interaction.edit_original_response(view=view)
         self.bot.add_view(view, message_id=message.id)
@@ -156,6 +175,47 @@ class SecretSantaBot:
         titles = {key: edition.title for key, edition in EDITIONS.items()}
         embed = ui.build_history_embed(interaction.guild.name, rows, titles)
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    async def _do_bump_current_game(
+        self, interaction: discord.Interaction
+    ) -> None:
+        """Repost the open lobby at the bottom of the channel.
+
+        The lobby scrolls away in a chatty channel and people should not have
+        to hunt for it. Posting a fresh copy is safe because every copy is
+        kept in sync and every copy's buttons work.
+        """
+        if not await self._require_db(interaction):
+            return
+        if interaction.guild is None:
+            await interaction.response.send_message(GUILD_ONLY, ephemeral=True)
+            return
+
+        game = await queries.get_open_game_in_guild(
+            self.db, str(interaction.guild_id)
+        )
+        if game is None:
+            await interaction.response.send_message(NO_OPEN_GAME, ephemeral=True)
+            return
+
+        edition = get_edition(game["edition_key"])
+        if edition is None:
+            await interaction.response.send_message(
+                EDITION_UNINSTALLED.format(
+                    game_id=game["id"], key=game["edition_key"]
+                ),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        message = await self.bump_lobby(game, edition)
+        if message is None:
+            await interaction.followup.send(BUMP_FAILED, ephemeral=True)
+            return
+        await interaction.followup.send(
+            edition.copy.bumped_ok.format(link=message.jump_url), ephemeral=True
+        )
 
     async def _assignment_embeds(
         self, user_id: str, guild_id: Optional[str]
@@ -482,8 +542,9 @@ class SecretSantaBot:
         _, edition = context
 
         participants = await queries.get_participants(self.db, game_id)
-        embed, page = ui.build_participants_embed(edition, participants, page)
-        total_pages = max(1, (len(participants) + ui.PAGE_SIZE - 1) // ui.PAGE_SIZE)
+        embed, page, total_pages = ui.build_participants_embed(
+            edition, participants, page
+        )
         view = (
             views.ParticipantsView(self, game_id, edition, page, total_pages)
             if total_pages > 1
@@ -604,20 +665,10 @@ class SecretSantaBot:
 
         return game, edition
 
-    async def _refresh_lobby(
-        self, game: asyncpg.Record, edition: Edition
-    ) -> None:
-        """Re-render the lobby message with the current count and buttons."""
-        try:
-            channel = self.bot.get_channel(int(game["channel_id"]))
-            if channel is None:
-                channel = await self.bot.fetch_channel(int(game["channel_id"]))
-            message = await channel.fetch_message(int(game["message_id"]))
-        except (discord.HTTPException, ValueError):
-            log.warning("Lobby message for game %s is unreachable", game["id"])
-            return
-
-        count = await queries.count_participants(self.db, game["id"])
+    def _lobby_content(
+        self, game: asyncpg.Record, edition: Edition, count: int
+    ) -> Tuple[discord.Embed, discord.ui.View]:
+        """The embed and buttons a lobby message should currently show."""
         if game["state"] == queries.STATE_OPEN:
             missing = edition.min_participants - count
             embed = ui.build_lobby_embed(
@@ -625,47 +676,166 @@ class SecretSantaBot:
                 count,
                 game["host_id"],
                 min_needed=(
-                    f"{missing} more participant(s) needed before the host can "
-                    f"start."
+                    edition.copy.not_ready_text.format(missing=missing)
                     if missing > 0
                     else None
                 ),
             )
         else:
             embed = ui.build_completed_embed(edition, count, game["host_id"])
+        return embed, views.build_lobby_view(self, game, edition, count)
 
-        view = views.build_lobby_view(self, game, edition, count)
+    async def _fetch_lobby_message(
+        self, row: asyncpg.Record
+    ) -> Optional[discord.Message]:
+        """Fetch one lobby message, or None when it is gone for good."""
         try:
-            await message.edit(embed=embed, view=view)
-        except discord.HTTPException:
-            log.exception("Failed to update lobby message for game %s", game["id"])
-            return
-        self.bot.add_view(view, message_id=message.id)
+            channel = self.bot.get_channel(int(row["channel_id"]))
+            if channel is None:
+                channel = await self.bot.fetch_channel(int(row["channel_id"]))
+            return await channel.fetch_message(int(row["message_id"]))
+        except discord.NotFound:
+            # Deleted in Discord — stop tracking it.
+            await queries.forget_lobby_message(
+                self.db, row["game_id"], row["message_id"]
+            )
+            log.info(
+                "Lobby message %s of game %s is gone, forgetting it",
+                row["message_id"],
+                row["game_id"],
+            )
+        except (discord.HTTPException, ValueError):
+            log.warning(
+                "Lobby message %s of game %s is unreachable",
+                row["message_id"],
+                row["game_id"],
+            )
+        return None
+
+    async def _refresh_lobby(
+        self, game: asyncpg.Record, edition: Edition
+    ) -> None:
+        """Re-render every message showing this game.
+
+        A busy channel can have several copies (the original plus any pushed
+        to the bottom), and each carries the same buttons, so they all have to
+        show the same participant count and the same Start state.
+        """
+        count = await queries.count_participants(self.db, game["id"])
+        embed, _ = self._lobby_content(game, edition, count)
+
+        for row in await queries.get_lobby_messages(self.db, game["id"]):
+            message = await self._fetch_lobby_message(row)
+            if message is None:
+                continue
+            # A fresh view per message: discord.py binds a persistent view to
+            # one message id, so they cannot share an instance.
+            _, view = self._lobby_content(game, edition, count)
+            try:
+                await message.edit(embed=embed, view=view)
+            except discord.HTTPException:
+                log.exception(
+                    "Failed to update lobby message %s of game %s",
+                    row["message_id"],
+                    game["id"],
+                )
+                continue
+            self.bot.add_view(view, message_id=message.id)
 
     async def restore_open_lobbies(self) -> None:
-        """Re-arm the buttons of every open lobby after a restart.
+        """Re-arm the buttons of every open lobby message after a restart.
 
         Without this, persistent views are lost on restart and clicking a
-        button on an old lobby does nothing.
+        button on an old lobby does nothing. Every copy of a game is re-armed,
+        not just the original.
         """
         if not self.db.ready:
             return
         try:
-            games = await queries.get_open_games(self.db)
+            rows = await queries.get_open_lobby_messages(self.db)
         except Exception:
-            log.exception("Could not load open games")
+            log.exception("Could not load open lobby messages")
             return
 
+        counts: Dict[int, int] = {}
+        games: Dict[int, asyncpg.Record] = {}
         restored = 0
-        for game in games:
+        for row in rows:
+            edition = get_edition(row["edition_key"])
+            if edition is None:
+                continue
+            game_id = row["game_id"]
+            if game_id not in games:
+                game = await queries.get_game(self.db, game_id)
+                if game is None:
+                    continue
+                games[game_id] = game
+                counts[game_id] = await queries.count_participants(self.db, game_id)
+            view = views.build_lobby_view(
+                self, games[game_id], edition, counts[game_id]
+            )
+            try:
+                self.bot.add_view(view, message_id=int(row["message_id"]))
+                restored += 1
+            except ValueError:
+                log.warning("Bad message id on game %s", game_id)
+        log.info(
+            "Restored buttons on %d lobby message(s) across %d game(s)",
+            restored,
+            len(games),
+        )
+
+    async def bump_lobby(
+        self, game: asyncpg.Record, edition: Edition
+    ) -> Optional[discord.Message]:
+        """Post the lobby again at the bottom of its channel.
+
+        Older pushed-down copies are removed first so the channel does not
+        collect one lobby per bump; the original message is left alone.
+        """
+        for row in await queries.get_bump_messages(self.db, game["id"]):
+            message = await self._fetch_lobby_message(row)
+            if message is not None:
+                try:
+                    await message.delete()
+                except discord.HTTPException:
+                    log.warning("Could not delete old bump %s", row["message_id"])
+            await queries.forget_lobby_message(
+                self.db, game["id"], row["message_id"]
+            )
+
+        try:
+            channel = self.bot.get_channel(int(game["channel_id"]))
+            if channel is None:
+                channel = await self.bot.fetch_channel(int(game["channel_id"]))
+        except (discord.HTTPException, ValueError):
+            log.warning("Channel of game %s is unreachable", game["id"])
+            return None
+
+        count = await queries.count_participants(self.db, game["id"])
+        embed, view = self._lobby_content(game, edition, count)
+        try:
+            message = await channel.send(embed=embed, view=view)
+        except discord.HTTPException:
+            log.exception("Could not post bumped lobby for game %s", game["id"])
+            return None
+
+        await queries.add_lobby_message(
+            self.db, game["id"], str(message.channel.id), str(message.id)
+        )
+        self.bot.add_view(view, message_id=message.id)
+        log.info("Bumped lobby of game %s to the bottom", game["id"])
+        return message
+
+    async def bump_all_open_games(self) -> int:
+        """Bump every open lobby. Used by the daily job."""
+        if not self.db.ready:
+            return 0
+        bumped = 0
+        for game in await queries.get_open_games(self.db):
             edition = get_edition(game["edition_key"])
             if edition is None:
                 continue
-            count = await queries.count_participants(self.db, game["id"])
-            view = views.build_lobby_view(self, game, edition, count)
-            try:
-                self.bot.add_view(view, message_id=int(game["message_id"]))
-                restored += 1
-            except ValueError:
-                log.warning("Bad message id on game %s", game["id"])
-        log.info("Restored buttons on %d open lobby/lobbies", restored)
+            if await self.bump_lobby(game, edition) is not None:
+                bumped += 1
+        return bumped
