@@ -257,6 +257,38 @@ async def remove_participant(db: Database, game_id: int, user_id: str) -> bool:
     return result != "DELETE 0"
 
 
+async def remove_participant_with_proxies(
+    db: Database, game_id: int, user_id: str
+) -> List[str]:
+    """Remove a member and everyone they registered dùm, atomically.
+
+    The people they entered have no Discord account of their own — their
+    assignment is delivered to whoever registered them. Leaving them behind
+    would strand them in the game and keep DMing someone who has left, so they
+    go too. Rejoining means registering them again.
+
+    Returns the display names of the proxies that were removed.
+    """
+    async with db.transaction() as conn:
+        proxies = await conn.fetch(
+            """
+            SELECT display_name FROM santa_participants
+            WHERE game_id = $1 AND registered_by = $2
+            """,
+            game_id,
+            user_id,
+        )
+        await conn.execute(
+            """
+            DELETE FROM santa_participants
+            WHERE game_id = $1 AND (user_id = $2 OR registered_by = $2)
+            """,
+            game_id,
+            user_id,
+        )
+    return [r["display_name"] for r in proxies]
+
+
 async def is_participant(db: Database, game_id: int, user_id: str) -> bool:
     return bool(
         await db.fetchval(

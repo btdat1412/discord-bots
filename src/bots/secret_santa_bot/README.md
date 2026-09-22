@@ -117,6 +117,11 @@ Press the button again to see everyone you entered, add another, or remove one.
 There is no edit: remove and re-add. Only the member who entered someone can
 remove them.
 
+**Leaving takes them with you.** If you press Join / Leave to drop out, everyone
+you registered drops out too — they have no account of their own, so with no
+registrar there is nobody to deliver their assignment to. Rejoining means
+registering them again.
+
 Under the hood a proxy is an ordinary participant row whose `user_id` is
 `proxy:<random hex>` instead of a Discord snowflake, with `registered_by`
 pointing at you. `queries.is_proxy()` is the only check needed anywhere.

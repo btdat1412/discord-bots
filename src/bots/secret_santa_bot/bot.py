@@ -335,10 +335,22 @@ class SecretSantaBot:
 
         user_id = str(interaction.user.id)
         if await queries.is_participant(self.db, game_id, user_id):
-            await queries.remove_participant(self.db, game_id, user_id)
-            await interaction.response.send_message(
-                edition.copy.left_ok, ephemeral=True
+            # Anyone they registered dùm leaves with them: those people have no
+            # account of their own, so without a registrar there is nobody to
+            # deliver their assignment to.
+            proxies = await queries.remove_participant_with_proxies(
+                self.db, game_id, user_id
             )
+            copy = edition.copy
+            message = (
+                copy.left_with_proxies_ok.format(
+                    count=len(proxies),
+                    names=", ".join(f"**{n}**" for n in proxies),
+                )
+                if proxies
+                else copy.left_ok
+            )
+            await interaction.response.send_message(message, ephemeral=True)
             await self._refresh_lobby(game, edition)
             return
 

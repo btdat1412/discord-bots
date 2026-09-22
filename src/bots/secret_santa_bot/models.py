@@ -178,6 +178,10 @@ class Copy:
     # Join flow
     joined_ok: str = "✅ Vô rồi nha. Chúc may mắn!"
     left_ok: str = "👋 Bạn đã rời game."
+    left_with_proxies_ok: str = (
+        "👋 Bạn đã rời game. {count} người bạn đăng ký dùm cũng rời theo: "
+        "{names}.\nMuốn quay lại thì tham gia rồi đăng ký dùm lại cho họ nhé."
+    )
     already_played: str = "❌ Game này chơi xong rồi."
     not_enough: str = (
         "❌ Cần ít nhất {needed} người, hiện mới có {count}."
