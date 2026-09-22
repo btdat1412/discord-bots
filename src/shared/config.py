@@ -48,6 +48,18 @@ BOT_CONFIGS = [
         ),
         cogs=["src.bots.gym_rat_bot"],
     ),
+    BotCfg(
+        name="secret-santa",
+        token=os.getenv("SECRET_SANTA_BOT_TOKEN", ""),
+        intents=IntentsCfg(
+            guilds=True,
+            members=True,
+            messages=True,
+            message_content=False,
+            reactions=False,
+        ),
+        cogs=["src.bots.secret_santa_bot"],
+    ),
 ]
 
 
