@@ -297,11 +297,11 @@ class TiGiaBot:
 
     # ---------------- Formatting ----------------
     def _format_gas_text(self, gas_list: list) -> str:
-        # Show E10 RON 95 (V & III) and Diesel
+        # Show E10 RON 95 (Mức 5 & Mức 3) and Diesel
         targets = {
-            "Xăng E10 RON 95-V": "E10 RON 95",
-            "Xăng E10 RON 95-III": "E10 RON 95-III",
-            "DO 0,05S-II": "Dầu Diesel",
+            "Xăng E10 RON 95 Mức 5": "E10 RON 95",
+            "Xăng E10 RON 95 Mức 3": "E10 RON 95-III",
+            "DO 0,05S Mức 2": "Dầu Diesel",
         }
         lines = []
         for item in gas_list:
@@ -309,6 +309,14 @@ class TiGiaBot:
             if title in targets:
                 price = item.get("zone1_price", 0)
                 lines.append(f"**{targets[title]}:** {price:,} VND/lít")
+        if not lines:
+            # Petrolimex renames products from time to time; list everything
+            # rather than show nothing when the targets stop matching.
+            log.warning("⛽ No target gas titles matched: %s", [i.get("title") for i in gas_list])
+            lines = [
+                f"**{item.get('title', '?')}:** {item.get('zone1_price', 0):,} VND/lít"
+                for item in gas_list
+            ]
         return "\n".join(lines) if lines else "Không có dữ liệu"
 
     def _format_btc_text(self, btc: dict) -> str:
