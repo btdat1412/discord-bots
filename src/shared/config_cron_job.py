@@ -61,11 +61,43 @@ def get_secret_santa_jobs() -> List[JobConfig]:
     return [create_daily_bump_job(hour)]
 
 
+def get_birthday_jobs() -> List[JobConfig]:
+    jobs = []
+
+    channel_id_str = os.getenv("BIRTHDAY_CHANNEL_ID", "").strip()
+    if not channel_id_str:
+        log.warning("🔧 BIRTHDAY_CHANNEL_ID is not set — no birthday wishes")
+        return jobs
+
+    hour_str = os.getenv("BIRTHDAY_HOUR", "7").strip()
+    try:
+        hour = int(hour_str)
+    except ValueError:
+        log.error("🔧 Invalid BIRTHDAY_HOUR: %s — using 7", hour_str)
+        hour = 7
+
+    try:
+        from src.shared.cron_job.birthday_jobs import create_daily_birthday_job
+
+        channel_id = int(channel_id_str)
+        jobs.append(create_daily_birthday_job(channel_id, hour))
+        log.info(
+            "🔧 Configured daily birthday wishes at %02d:00 for channel: %s",
+            hour,
+            channel_id,
+        )
+    except ValueError:
+        log.error("🔧 Invalid BIRTHDAY_CHANNEL_ID: %s", channel_id_str)
+
+    return jobs
+
+
 # Bot name to job configuration function mapping
 BOT_CRON_MAPPINGS = {
     "ti-gia": get_ti_gia_jobs,
     "gym-rat": get_gym_rat_jobs,
     "secret-santa": get_secret_santa_jobs,
+    "birthday": get_birthday_jobs,
 }
 
 

@@ -60,6 +60,18 @@ BOT_CONFIGS = [
         ),
         cogs=["src.bots.secret_santa_bot"],
     ),
+    BotCfg(
+        name="birthday",
+        token=os.getenv("BIRTHDAY_BOT_TOKEN", ""),
+        intents=IntentsCfg(
+            guilds=True,
+            members=False,
+            messages=True,
+            message_content=False,
+            reactions=False,
+        ),
+        cogs=["src.bots.birthday_bot"],
+    ),
 ]
 
 
